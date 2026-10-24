@@ -4,6 +4,8 @@ An Android app that runs a simple crypto trading strategy on an **Alpaca paper a
 
 ## What it does
 
+- **Trend portfolio (recommended):** the model that held up best in out-of-sample testing. One third of the bot's money each in BTC, ETH and SOL; hold a coin only while it is above its 150-day average, sized down when it is volatile (target ~50% yearly swings), rebalanced when a holding drifts more than 10% from target.
+
 - **Strategy:** moving-average crossover on daily closes. Buy when the fast average (default 20 days) rises above the slow one (default 100 days); sell when it falls back below.
 - **Risk rules:**
   - Position cap: a buy uses at most 50% of account equity (adjustable). The cap applies when buying; a winning position can grow past it.
@@ -58,6 +60,20 @@ In a falling year the scalper lost much less than holding, mostly because the tr
 | SOL | -84.5% | -12.3% | -5.7% | -5.6% |
 
 Waiting for the turn up avoids most falling knives, but it did not reliably beat the trend filter, and none of the versions made money after fees. The filtered versions trade only 7 to 39 times a year, so differences between them are mostly luck.
+
+### Trend portfolio: how it was chosen
+
+`research/strategy_search.py` tested daily SMA crossovers, price-above-average, momentum, breakouts, coin rotation and hourly trend rules on Binance BTC/ETH/SOL candles from 2020. Parameters were picked on 2020-2023 only, then judged on Jan 2024 to Sep 2026, which the search never saw. Daily trend rules with volatility sizing did best out of sample, and every parameter setting of them was positive there; hourly rules lost money after fees. Kotlin backtest of the final model (`PortfolioTest`, 0.25% fee):
+
+|                                   | Total   | Per year | Worst drop | Sharpe |
+|-----------------------------------|--------:|---------:|-----------:|-------:|
+| Trend portfolio, 2024 to Sep 2026 | +70%    | 21%      | -26%       | 0.78   |
+| Buy and hold thirds, same period  | +10% to +54%* | 4% to 17% | -64% to -75% | 0.43 to 0.56 |
+| Buy and hold BTC only             | +98%    | 28%      | -53%       | 0.76   |
+
+\*+10% if bought once and left alone, +54% if rebalanced to equal thirds daily.
+
+It is a "lose less in crashes" model: in 2021 it made +129% while holding made +1,150%, and in 2022 it lost 11% while holding lost 80%. Holding only Bitcoin made more since 2024, with twice the worst drop. Under three years of out-of-sample data is not proof it will keep working.
 
 ## Project layout
 

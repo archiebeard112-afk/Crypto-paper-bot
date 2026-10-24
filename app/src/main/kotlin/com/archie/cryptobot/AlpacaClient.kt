@@ -92,6 +92,9 @@ class AlpacaClient(private val keys: ApiKeys?) {
             .put("time_in_force", "gtc")
             .put("stop_price", price(stop)).put("limit_price", price(limit)))!!)
 
+    fun marketSell(symbol: String, qty: String): JSONObject = JSONObject(request("POST", "$PAPER_URL/v2/orders", JSONObject()
+        .put("symbol", symbol).put("qty", qty).put("side", "sell").put("type", "market").put("time_in_force", "gtc"))!!)
+
     /** Resting take-profit sell. */
     fun limitSell(symbol: String, qty: String, limit: Double): JSONObject =
         JSONObject(request("POST", "$PAPER_URL/v2/orders", JSONObject()

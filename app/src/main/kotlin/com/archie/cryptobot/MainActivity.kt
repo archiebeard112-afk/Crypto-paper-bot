@@ -63,6 +63,7 @@ import bot.Backtest
 import bot.BacktestResult
 import bot.Decision
 import bot.Metrics
+import bot.Portfolio
 import bot.ProfitLoss
 import bot.Scalp
 import bot.ScalpSettings
@@ -127,7 +128,8 @@ fun BotScreen() {
     val s = BotStore.settings(context)
     val hasKeys = KeyVault.load(context) != null
 
-    Text(if (s.mode == "scalp") "${s.symbol}  ·  Scalp${if (s.scalp.entry == "reversal") " (dip then turn up)" else ""}: RSI<${s.scalp.rsiBuy.toInt()}, +${pct(s.scalp.takeProfitPct, 1)} / -${pct(s.scalp.stopPct, 1)}, " +
+    Text(if (s.mode == "portfolio") "Trend portfolio: BTC + ETH + SOL, daily, 150-day trend, volatility-sized"
+        else if (s.mode == "scalp") "${s.symbol}  ·  Scalp${if (s.scalp.entry == "reversal") " (dip then turn up)" else ""}: RSI<${s.scalp.rsiBuy.toInt()}, +${pct(s.scalp.takeProfitPct, 1)} / -${pct(s.scalp.stopPct, 1)}, " +
             "max ${s.scalp.maxHoldBars * 15 / 60.0}h  ·  cap ${pct(s.maxPositionPct)}"
         else "${s.symbol}  ·  Trend: SMA ${s.fast}/${s.slow} days  ·  cap ${pct(s.maxPositionPct)}  ·  stop ${pct(s.stopLossPct)}",
         style = MaterialTheme.typography.bodyMedium)
@@ -159,7 +161,9 @@ fun BotScreen() {
         scope.launch {
             status = try {
                 val snap = withContext(Dispatchers.IO) { Bot.runOnce(context, trade = false) }
-                buildString {
+                if (s.mode == "portfolio") "Paper equity: ${Decision.money(snap.equity)}  (cash ${Decision.money(snap.cash)})\n" +
+                    snap.action.reason
+                else buildString {
                     appendLine("Paper equity: ${Decision.money(snap.equity)}  (cash ${Decision.money(snap.cash)})")
                     appendLine("${s.symbol}: ${Decision.money(snap.price)}")
                     snap.position?.let { appendLine("Holding ${"%.6f".format(it.qty)} @ ${Decision.money(it.entryPrice)}") }
@@ -278,7 +282,9 @@ fun BacktestScreen() {
     val s = BotStore.settings(context)
 
     val scalp = s.mode == "scalp"
-    Text(if (scalp) "Replays scalp mode on the last 90 days of 15-minute ${s.symbol} candles from Alpaca and compares it with " +
+    Text(if (s.mode == "portfolio") "Replays the trend portfolio on daily BTC, ETH and SOL history from Alpaca and compares " +
+            "it with buying and holding. Each trade pays a ${pct(s.feePct, 2)} fee."
+        else if (scalp) "Replays scalp mode on the last 90 days of 15-minute ${s.symbol} candles from Alpaca and compares it with " +
             "buying and holding. Take-profits fill inside a candle; stops and time limits fill at the candle's close, " +
             "like the live bot. Every fill pays a ${pct(s.feePct, 2)} fee."
         else "Replays the strategy on daily ${s.symbol} history from Alpaca and compares it with simply buying and holding. " +
@@ -292,6 +298,15 @@ fun BacktestScreen() {
             try {
                 rows = withContext(Dispatchers.IO) {
                     val api = AlpacaClient(KeyVault.load(context))
+                    if (s.mode == "portfolio") {
+                        val data = Portfolio.COINS.associateWith { api.dailyBars(it, Instant.parse("2015-01-01T00:00:00Z")) }
+                        return@withContext listOf(
+                            "Buy and hold, equal thirds" to Portfolio.buyAndHold(data, s.feePct),
+                            "Buy and hold BTC only" to Portfolio.buyAndHold(mapOf("BTC/USD" to data["BTC/USD"]!!), s.feePct),
+                            "Trend portfolio, if trading were free" to Portfolio.backtest(data, 0.0),
+                            "Trend portfolio" to Portfolio.backtest(data, s.feePct),
+                        ).map { (n, r) -> BacktestRow(n, r, Backtest.metrics(r, 365.0)) }
+                    }
                     if (scalp) {
                         val bars = api.bars(s.symbol, "15Min", Instant.now().minusSeconds(90L * 86_400))
                         return@withContext listOf(
@@ -340,7 +355,7 @@ fun BacktestScreen() {
     val bh = r[0].metrics
     val mine = r[3].metrics
     val verdict = if (mine.totalReturn >= bh.totalReturn) "beat" else "trailed"
-    Text("Your settings $verdict buy-and-hold over this period (${pct(mine.totalReturn)} vs ${pct(bh.totalReturn)}), " +
+    Text((if (s.mode == "portfolio") "The trend portfolio" else "Your settings") + " $verdict buy-and-hold over this period (${pct(mine.totalReturn)} vs ${pct(bh.totalReturn)}), " +
         "with a worst drop of ${pct(mine.maxDrawdown)} vs ${pct(bh.maxDrawdown)}. Past results don't predict future ones, " +
         "and tuning settings until the backtest looks good usually makes live results worse.",
         style = MaterialTheme.typography.bodySmall)
@@ -449,15 +464,19 @@ fun SettingsScreen() {
 
     Spacer(Modifier.height(24.dp))
     Text("Strategy", style = MaterialTheme.typography.titleMedium)
-    Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = mode == "trend", onClick = { mode = "trend" }, label = { Text("Trend (daily)") })
+    Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = mode == "portfolio", onClick = { mode = "portfolio" }, label = { Text("Trend portfolio") })
+        FilterChip(selected = mode == "trend", onClick = { mode = "trend" }, label = { Text("Trend (one coin)") })
         FilterChip(selected = mode == "scalp", onClick = { mode = "scalp" }, label = { Text("Scalp (15-min)") })
     }
-    Text(if (mode == "scalp") "Buys sharp dips on 15-minute candles (RSI below your level) and sells quickly at a small " +
+    if (mode == "portfolio") Text("Best model from testing. Splits the bot's money into thirds for BTC, ETH and SOL. Holds a coin " +
+        "only while its price is above its 150-day average, and holds less of it when it's swinging wildly. Rebalances when a " +
+        "holding drifts more than 10% from target. Settings are fixed to what was tested.", style = MaterialTheme.typography.bodySmall)
+    else Text(if (mode == "scalp") "Buys sharp dips on 15-minute candles (RSI below your level) and sells quickly at a small " +
             "gain, a small loss, or a time limit. Trades often, so fees matter a lot."
         else "Buys when the fast moving average of daily closes rises above the slow one, sells when it drops below. Trades a few times a year.",
         style = MaterialTheme.typography.bodySmall)
-    Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (mode != "portfolio") Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BotStore.symbols.forEach { FilterChip(selected = symbol == it, onClick = { symbol = it }, label = { Text(it) }) }
     }
     if (mode == "scalp") {
@@ -482,7 +501,7 @@ fun SettingsScreen() {
             Switch(checked = trendFilter, onCheckedChange = { trendFilter = it })
         }
         NumberField("Max position %", cap, Modifier.fillMaxWidth()) { cap = it }
-    } else {
+    } else if (mode == "trend") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NumberField("Fast (days)", fast, Modifier.weight(1f)) { fast = it }
             NumberField("Slow (days)", slow, Modifier.weight(1f)) { slow = it }

@@ -1,0 +1,67 @@
+===== DAILY candles, fee 0.25% per trade, in-sample to 2023-12-31, out-of-sample from 2024-01-01
+Buy & hold, equal weight   IS: tot    2561%  CAGR  127.0%  Sharpe  1.43  maxDD  -85.5%
+                          OOS: tot      54%  CAGR   17.1%  Sharpe  0.56  maxDD  -64.3%
+   B&H BTCUSDT OOS: tot      98%  CAGR   28.1%  Sharpe  0.76  maxDD  -53.0%
+   B&H ETHUSDT OOS: tot      18%  CAGR    6.1%  Sharpe  0.42  maxDD  -67.6%
+   B&H SOLUSDT OOS: tot      16%  CAGR    5.6%  Sharpe  0.46  maxDD  -76.3%
+SMA crossover: best in-sample params {'f': 5, 's': 150}
+     IS: tot    3052%  CAGR  136.8%  Sharpe  1.94  maxDD  -44.5%
+    OOS: tot      70%  CAGR   21.2%  Sharpe  0.68  maxDD  -33.7%   | all params OOS Sharpe median 0.53, 100% positive
+     OOS by coin: BTC 72%  ETH 42%  SOL 58%
+Price above SMA: best in-sample params {'n': 50}
+     IS: tot    2650%  CAGR  128.9%  Sharpe  1.90  maxDD  -53.6%
+    OOS: tot      93%  CAGR   27.1%  Sharpe  0.82  maxDD  -36.9%   | all params OOS Sharpe median 0.61, 100% positive
+     OOS by coin: BTC 98%  ETH 195%  SOL -2%
+Momentum (N-day return > 0): best in-sample params {'n': 30}
+     IS: tot    4873%  CAGR  165.4%  Sharpe  2.18  maxDD  -40.2%
+    OOS: tot      58%  CAGR   18.0%  Sharpe  0.62  maxDD  -42.9%   | all params OOS Sharpe median 0.51, 100% positive
+     OOS by coin: BTC 17%  ETH 144%  SOL 9%
+Breakout (Donchian): best in-sample params {'n': 30, 'm': 20}
+     IS: tot    3510%  CAGR  145.0%  Sharpe  2.14  maxDD  -45.1%
+    OOS: tot      43%  CAGR   13.9%  Sharpe  0.56  maxDD  -38.2%   | all params OOS Sharpe median 0.66, 100% positive
+     OOS by coin: BTC 31%  ETH 74%  SOL 4%
+SMA crossover + vol target 50%: best in-sample params {'f': 5, 's': 150}
+     IS: tot     611%  CAGR   63.2%  Sharpe  1.87  maxDD  -32.0%
+    OOS: tot      74%  CAGR   22.2%  Sharpe  0.81  maxDD  -26.1%   | all params OOS Sharpe median 0.64, 100% positive
+     OOS by coin: BTC 68%  ETH 53%  SOL 80%
+Price above SMA + vol target 50%: best in-sample params {'n': 150}
+     IS: tot     576%  CAGR   61.2%  Sharpe  1.82  maxDD  -31.2%
+    OOS: tot      72%  CAGR   21.7%  Sharpe  0.80  maxDD  -25.5%   | all params OOS Sharpe median 0.73, 100% positive
+     OOS by coin: BTC 86%  ETH 82%  SOL 32%
+Momentum (N-day return > 0) + vol target 50%: best in-sample params {'n': 30}
+     IS: tot     834%  CAGR   74.8%  Sharpe  2.05  maxDD  -34.4%
+    OOS: tot      51%  CAGR   16.1%  Sharpe  0.64  maxDD  -39.6%   | all params OOS Sharpe median 0.64, 100% positive
+     OOS by coin: BTC 18%  ETH 104%  SOL 25%
+Breakout (Donchian) + vol target 50%: best in-sample params {'n': 30, 'm': 20}
+     IS: tot     594%  CAGR   62.3%  Sharpe  1.90  maxDD  -37.2%
+    OOS: tot      36%  CAGR   11.8%  Sharpe  0.56  maxDD  -35.4%   | all params OOS Sharpe median 0.73, 100% positive
+     OOS by coin: BTC 28%  ETH 51%  SOL 14%
+
+===== HOURLY candles, fee 0.25% per trade, in-sample to 2023-12-31, out-of-sample from 2024-01-01
+Buy & hold, equal weight   IS: tot    2640%  CAGR  128.8%  Sharpe  1.42  maxDD  -86.1%
+                          OOS: tot      56%  CAGR   17.5%  Sharpe  0.57  maxDD  -65.4%
+   B&H BTCUSDT OOS: tot      98%  CAGR   28.1%  Sharpe  0.76  maxDD  -53.7%
+   B&H ETHUSDT OOS: tot      18%  CAGR    6.1%  Sharpe  0.42  maxDD  -69.1%
+   B&H SOLUSDT OOS: tot      16%  CAGR    5.6%  Sharpe  0.48  maxDD  -78.7%
+SMA crossover (hours): best in-sample params {'f': 48, 's': 480}
+     IS: tot    2405%  CAGR  123.8%  Sharpe  1.77  maxDD  -55.1%
+    OOS: tot      36%  CAGR   11.7%  Sharpe  0.49  maxDD  -47.5%   | all params OOS Sharpe median 0.26, 75% positive
+     OOS by coin: BTC 91%  ETH -18%  SOL 24%
+Price above SMA (hours): best in-sample params {'n': 720}
+     IS: tot    1042%  CAGR   83.9%  Sharpe  1.42  maxDD  -62.6%
+    OOS: tot       4%  CAGR    1.4%  Sharpe  0.22  maxDD  -52.3%   | all params OOS Sharpe median -1.30, 29% positive
+     OOS by coin: BTC -22%  ETH 36%  SOL -18%
+SMA crossover (hours) + vol target 50%: best in-sample params {'f': 48, 's': 480}
+     IS: tot     166%  CAGR   27.7%  Sharpe  0.97  maxDD  -47.5%
+    OOS: tot     -17%  CAGR   -6.4%  Sharpe -0.09  maxDD  -49.6%   | all params OOS Sharpe median -0.21, 10% positive
+     OOS by coin: BTC 56%  ETH -51%  SOL -34%
+Price above SMA (hours) + vol target 50%: best in-sample params {'n': 720}
+     IS: tot      88%  CAGR   17.1%  Sharpe  0.68  maxDD  -63.3%
+    OOS: tot     -32%  CAGR  -13.1%  Sharpe -0.36  maxDD  -55.4%   | all params OOS Sharpe median -1.78, 0% positive
+     OOS by coin: BTC -32%  ETH -20%  SOL -50%
+
+===== ROTATION (daily): hold the strongest of BTC/ETH/SOL by N-day return, cash if all negative
+best IS params {'n': 30, 'top': 2}
+     IS: tot   12966%  CAGR  237.8%  Sharpe  2.19  maxDD  -51.2%
+    OOS: tot      67%  CAGR   20.6%  Sharpe  0.64  maxDD  -42.8%
+     all params OOS Sharpe: 10/1:-0.54 10/2:-0.08 20/1:0.74 20/2:0.47 30/1:0.30 30/2:0.64 60/1:0.07 60/2:0.36 90/1:0.25 90/2:0.38

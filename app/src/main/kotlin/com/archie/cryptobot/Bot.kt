@@ -17,6 +17,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import bot.Action
 import bot.Decision
+import bot.Portfolio
 import bot.Position
 import bot.ProfitLoss
 import bot.ProfitLossCalc
@@ -51,6 +52,7 @@ object Bot {
         val account = api.account() // throws unless this is a paper account
         val equity = account.getDouble("equity")
         val cash = account.optDouble("non_marginable_buying_power", account.getDouble("cash"))
+        if (s.mode == "portfolio") return runPortfolio(context, api, equity, cash, trade)
         val now = Instant.now().epochSecond
         val scalp = s.mode == "scalp"
         val bars = if (scalp) {
@@ -109,6 +111,64 @@ object Bot {
         }
         return Snapshot(equity, cash, price, position, action)
     }
+
+    /**
+     * Trend portfolio: one third of the bot's money per coin, each sized by [Portfolio.targetExposure]
+     * on finished daily candles and rebalanced only when it drifts more than the band.
+     */
+    private fun runPortfolio(context: Context, api: AlpacaClient, equity: Double, cash: Double, trade: Boolean): Snapshot {
+        val now = Instant.now().epochSecond
+        val pl = profitLoss(context, api)
+        val botEquity = pl?.let { minOf(it.currentValue, equity) } ?: equity
+        var botCash = pl?.let { minOf(it.cash, cash).coerceAtLeast(0.0) } ?: cash
+        val prices = api.latestPrices(Portfolio.COINS)
+        val slice = botEquity / Portfolio.COINS.size
+        val lines = mutableListOf<String>()
+        var traded = false
+        for (coin in Portfolio.COINS) {
+            val closes = api.dailyBars(coin, Instant.ofEpochSecond(now - (Portfolio.TREND_DAYS + 40) * Portfolio.DAY))
+                .filter { it.time + Portfolio.DAY <= now }.map { it.close }.toDoubleArray()
+            val price = prices[coin] ?: continue
+            val pos = api.position(coin)
+            val held = pos?.getDouble("qty") ?: 0.0
+            val target = Portfolio.targetExposure(closes)
+            val amount = Portfolio.tradeAmount(slice, held * price, target)
+            val name = coin.substringBefore('/')
+            val status = "$name: holding ${pct(held * price / slice)} of its share, target ${pct(target)}"
+            if (amount == 0.0 || !trade) {
+                lines += status + when {
+                    amount > 0 -> " → buy ${Decision.money(amount)}"
+                    amount < 0 -> " → sell ${Decision.money(-amount)}"
+                    else -> ""
+                }
+                continue
+            }
+            if (amount > 0) {
+                val spend = kotlin.math.floor(minOf(amount, botCash) * 100) / 100
+                if (spend < 10) { lines += "$status (not enough cash to buy)"; continue }
+                api.orders(coin, "open").filter { it.optString("side") == "sell" }.forEach { api.cancelOrder(it.getString("id")) }
+                api.buyNotional(coin, spend)
+                botCash -= spend
+                lines += "$status → BOUGHT ${Decision.money(spend)}"
+            } else {
+                api.orders(coin, "open").forEach { api.cancelOrder(it.getString("id")) }
+                if (target == 0.0) {
+                    api.closePosition(coin)
+                    lines += "$status → SOLD all (price fell below its 150-day average)"
+                } else {
+                    val qty = kotlin.math.floor(minOf(held, -amount / price) * 1e6) / 1e6
+                    if (qty > 0) api.marketSell(coin, "%.6f".format(java.util.Locale.US, qty))
+                    lines += "$status → SOLD ${Decision.money(-amount)}"
+                }
+            }
+            traded = true
+        }
+        val summary = lines.joinToString("\n")
+        if (trade) record(context, "Trend portfolio\n$summary", notify = traded)
+        return Snapshot(equity, cash, prices["BTC/USD"] ?: 0.0, null, Action.Hold(summary))
+    }
+
+    private fun pct(v: Double) = "%.0f%%".format(v * 100)
 
     /** Profit and loss since the starting amount was set, or null if none is set. */
     fun profitLoss(context: Context, api: AlpacaClient): ProfitLoss? {

@@ -114,7 +114,9 @@ object Backtest {
             sharpe = if (sd > 0) mean / sd * sqrt(periodsPerYear) else 0.0,
             trades = r.trades.size,
             stopOuts = r.trades.count { it.reason == "stop" },
-            winRate = if (r.trades.isEmpty()) Double.NaN else r.trades.count { it.returnPct > 0 }.toDouble() / r.trades.size,
+            winRate = r.trades.filter { it.reason != "rebalance" }.let { closed ->
+                if (closed.isEmpty()) Double.NaN else closed.count { it.returnPct > 0 }.toDouble() / closed.size
+            },
             timeInMarket = r.timeInMarket,
         )
     }
