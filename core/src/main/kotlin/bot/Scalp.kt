@@ -17,6 +17,13 @@ data class ScalpSettings(
     val maxHoldBars: Int = 24,
     /** Only buy dips while the price is above its 200-candle average (about 2 days). */
     val trendFilter: Boolean = true,
+    /**
+     * "dip": buy as soon as RSI is below [rsiBuy].
+     * "reversal": wait until after a dip (RSI below [rsiBuy] within the last [dipLookback] candles)
+     * the 9-candle average crosses above the 21-candle average, i.e. the price has started turning up.
+     */
+    val entry: String = "dip",
+    val dipLookback: Int = 8,
 ) {
     init {
         require(rsiBuy > 0 && rsiBuy < 100) { "RSI level must be between 0 and 100" }
@@ -53,12 +60,41 @@ object Scalp {
         return out
     }
 
-    /** true on candles whose close is a buy signal. */
-    fun signal(closes: DoubleArray, s: ScalpSettings): BooleanArray {
+    const val TURN_FAST = 9
+    const val TURN_SLOW = 21
+
+    /** Exponential moving average, seeded with the first value. */
+    fun ema(values: DoubleArray, window: Int): DoubleArray {
+        val out = DoubleArray(values.size)
+        val k = 2.0 / (window + 1)
+        for (i in values.indices) out[i] = if (i == 0) values[0] else values[i] * k + out[i - 1] * (1 - k)
+        return out
+    }
+
+    /** Per candle: was RSI below the buy level recently, and did the short average just cross above the longer one? */
+    class Parts(val dip: BooleanArray, val recentDip: BooleanArray, val turnUp: BooleanArray, val trendOk: BooleanArray)
+
+    fun parts(closes: DoubleArray, s: ScalpSettings): Parts {
         val r = rsi(closes)
         val trend = Strategy.sma(closes, TREND_BARS)
+        val fast = ema(closes, TURN_FAST)
+        val slow = ema(closes, TURN_SLOW)
+        val dip = BooleanArray(closes.size) { !r[it].isNaN() && r[it] < s.rsiBuy }
+        var lastDip = -1_000_000
+        val recentDip = BooleanArray(closes.size) { i ->
+            if (dip[i]) lastDip = i
+            i - lastDip <= s.dipLookback
+        }
+        val turnUp = BooleanArray(closes.size) { i -> i > 0 && fast[i] > slow[i] && fast[i - 1] <= slow[i - 1] }
+        val trendOk = BooleanArray(closes.size) { i -> !s.trendFilter || (!trend[i].isNaN() && closes[i] > trend[i]) }
+        return Parts(dip, recentDip, turnUp, trendOk)
+    }
+
+    /** true on candles whose close is a buy signal. */
+    fun signal(closes: DoubleArray, s: ScalpSettings): BooleanArray {
+        val p = parts(closes, s)
         return BooleanArray(closes.size) { i ->
-            !r[i].isNaN() && r[i] < s.rsiBuy && (!s.trendFilter || (!trend[i].isNaN() && closes[i] > trend[i]))
+            i >= WARMUP - 1 && p.trendOk[i] && if (s.entry == "reversal") p.recentDip[i] && p.turnUp[i] else p.dip[i]
         }
     }
 
@@ -154,14 +190,20 @@ object Scalp {
         if (!signal(closes, p).last()) {
             val r = rsi(closes).last()
             val avg = Strategy.sma(closes, TREND_BARS).last()
-            return Action.Hold(
-                if (r >= p.rsiBuy) "No dip: RSI ${"%.0f".format(r)} (buys below ${"%.0f".format(p.rsiBuy)})"
-                else "Dip found (RSI ${"%.0f".format(r)}), but the price is below its 2-day average " +
-                    "(${Decision.money(avg)}), so the trend filter is waiting for the slide to stop"
-            )
+            val parts = parts(closes, p)
+            val n = closes.size - 1
+            val rsiText = "RSI ${"%.0f".format(r)}, buys below ${"%.0f".format(p.rsiBuy)}"
+            return Action.Hold(when {
+                p.entry == "reversal" && !parts.recentDip[n] -> "No recent dip ($rsiText)"
+                p.entry == "reversal" && !parts.turnUp[n] -> "Dip seen in the last ${p.dipLookback * 15} min; waiting for the price to turn up"
+                p.entry != "reversal" && !parts.dip[n] -> "No dip: $rsiText"
+                else -> "Buy setup found, but the price is below its 2-day average (${Decision.money(avg)}), " +
+                    "so the trend filter is waiting"
+            })
         }
         val notional = kotlin.math.floor(min(equity * s.maxPositionPct, cash) * 100) / 100
         if (notional < 10) return Action.Hold("Not enough cash to buy (${Decision.money(notional)})")
-        return Action.Buy(notional, lastPrice * (1 - p.stopPct), "Dip: RSI below ${"%.0f".format(p.rsiBuy)}")
+        return Action.Buy(notional, lastPrice * (1 - p.stopPct),
+            if (p.entry == "reversal") "Dip then turn up: short average crossed above the longer one" else "Dip: RSI below ${"%.0f".format(p.rsiBuy)}")
     }
 }

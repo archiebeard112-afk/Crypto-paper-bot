@@ -29,6 +29,11 @@ class ScalpReportTest {
             "Deeper dips (RSI<20)" to base.copy(scalp = base.scalp.copy(rsiBuy = 20.0)),
             "Wider (+3% / -3%, 12h)" to base.copy(scalp = ScalpSettings(takeProfitPct = 0.03, stopPct = 0.03, maxHoldBars = 48)),
             "Tighter (+0.8% / -0.8%)" to base.copy(scalp = ScalpSettings(takeProfitPct = 0.008, stopPct = 0.008)),
+            "Dip then turn up (no trend filter)" to base.copy(scalp = ScalpSettings(entry = "reversal", trendFilter = false)),
+            "Dip then turn up + trend filter" to base.copy(scalp = ScalpSettings(entry = "reversal")),
+            "Dip then turn up, +3% / -2%, 12h" to base.copy(scalp = ScalpSettings(entry = "reversal", trendFilter = false,
+                takeProfitPct = 0.03, stopPct = 0.02, maxHoldBars = 48)),
+            "Dip then turn up, RSI<25" to base.copy(scalp = ScalpSettings(entry = "reversal", trendFilter = false, rsiBuy = 25.0)),
             "Default at 0.10% fee" to base.copy(feePct = 0.001),
             "Default with zero fees" to base.copy(feePct = 0.0),
         )

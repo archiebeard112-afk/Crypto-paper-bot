@@ -53,7 +53,26 @@ class ScalpTest {
         val bars = dipThenRebound(200.0).take(231)
         val a = Scalp.decide(noFilter.copy(scalp = ScalpSettings(trendFilter = true)), bars, 93.8, null, null, 0, 1000.0, 1000.0)
         assertIs<Action.Hold>(a)
-        assertTrue(a.reason.startsWith("Dip found"), a.reason)
+        assertTrue(a.reason.startsWith("Buy setup found"), a.reason)
+    }
+
+    @Test fun reversalWaitsForTheTurnUp() {
+        val bars = dipThenRebound(93.9).take(231).toMutableList()
+        val rev = noFilter.copy(scalp = ScalpSettings(trendFilter = false, entry = "reversal"))
+        // Right after the drop: dip seen, no turn up yet.
+        val waiting = Scalp.decide(rev, bars, 93.8, null, null, 0, 1000.0, 1000.0)
+        assertIs<Action.Hold>(waiting)
+        assertTrue(waiting.reason.startsWith("Dip seen"), waiting.reason)
+        // Then the price climbs back until the 9-candle average crosses the 21-candle one.
+        var p = 93.8
+        var bought: Action? = null
+        for (k in 0 until 8) {
+            p += 1.0
+            bars += Bar(bars.size * Scalp.BAR_SECONDS, p - 1, p, p - 1, p)
+            val a = Scalp.decide(rev, bars, p, null, null, 0, 1000.0, 1000.0)
+            if (a is Action.Buy) { bought = a; break }
+        }
+        assertIs<Action.Buy>(bought)
     }
 
     @Test fun liveDecision() {
