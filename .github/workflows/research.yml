@@ -31,3 +31,7 @@ jobs:
         env:
           SCALP_DATA_DIR: ${{ github.workspace }}/data
         run: ./gradlew :core:test --tests 'bot.ScalpReportTest' --rerun
+      - name: Show report
+        run: |
+          cat data/report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Scalp report::$(sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g' data/report.txt)"

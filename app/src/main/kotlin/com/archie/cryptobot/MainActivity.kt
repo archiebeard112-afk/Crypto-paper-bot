@@ -64,6 +64,8 @@ import bot.BacktestResult
 import bot.Decision
 import bot.Metrics
 import bot.ProfitLoss
+import bot.Scalp
+import bot.ScalpSettings
 import bot.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -125,7 +127,9 @@ fun BotScreen() {
     val s = BotStore.settings(context)
     val hasKeys = KeyVault.load(context) != null
 
-    Text("${s.symbol}  ·  SMA ${s.fast}/${s.slow} days  ·  cap ${pct(s.maxPositionPct)}  ·  stop ${pct(s.stopLossPct)}",
+    Text(if (s.mode == "scalp") "${s.symbol}  ·  Scalp: RSI<${s.scalp.rsiBuy.toInt()}, +${pct(s.scalp.takeProfitPct, 1)} / -${pct(s.scalp.stopPct, 1)}, " +
+            "max ${s.scalp.maxHoldBars * 15 / 60.0}h  ·  cap ${pct(s.maxPositionPct)}"
+        else "${s.symbol}  ·  Trend: SMA ${s.fast}/${s.slow} days  ·  cap ${pct(s.maxPositionPct)}  ·  stop ${pct(s.stopLossPct)}",
         style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(12.dp))
     if (!hasKeys) {
@@ -273,8 +277,12 @@ fun BacktestScreen() {
     var busy by remember { mutableStateOf(false) }
     val s = BotStore.settings(context)
 
-    Text("Replays the strategy on daily ${s.symbol} history from Alpaca and compares it with simply buying and holding. " +
-        "Fills happen at the next day's open and pay a ${pct(s.feePct, 2)} fee per trade.",
+    val scalp = s.mode == "scalp"
+    Text(if (scalp) "Replays scalp mode on the last 90 days of 15-minute ${s.symbol} candles from Alpaca and compares it with " +
+            "buying and holding. Take-profits fill inside a candle; stops and time limits fill at the candle's close, " +
+            "like the live bot. Every fill pays a ${pct(s.feePct, 2)} fee."
+        else "Replays the strategy on daily ${s.symbol} history from Alpaca and compares it with simply buying and holding. " +
+            "Fills happen at the next day's open and pay a ${pct(s.feePct, 2)} fee per trade.",
         style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(12.dp))
     Button(enabled = !busy, onClick = {
@@ -283,7 +291,17 @@ fun BacktestScreen() {
         scope.launch {
             try {
                 rows = withContext(Dispatchers.IO) {
-                    val bars = AlpacaClient(KeyVault.load(context)).dailyBars(s.symbol, Instant.parse("2015-01-01T00:00:00Z"))
+                    val api = AlpacaClient(KeyVault.load(context))
+                    if (scalp) {
+                        val bars = api.bars(s.symbol, "15Min", Instant.now().minusSeconds(90L * 86_400))
+                        return@withContext listOf(
+                            "Buy and hold" to Scalp.buyAndHold(bars, s),
+                            "Your settings, if trading were free" to Scalp.backtest(bars, s.copy(feePct = 0.0)),
+                            "Your settings, all-in" to Scalp.backtest(bars, s.copy(maxPositionPct = 1.0)),
+                            "Your settings" to Scalp.backtest(bars, s),
+                        ).map { (n, r) -> BacktestRow(n, r, Backtest.metrics(r, 365.0 * 96)) }
+                    }
+                    val bars = api.dailyBars(s.symbol, Instant.parse("2015-01-01T00:00:00Z"))
                     listOf(
                         "Buy and hold" to Backtest.buyAndHold(bars, s),
                         "Strategy, all-in, no stop" to Backtest.run(bars, s.copy(maxPositionPct = 1.0, stopLossPct = 1.0)),
@@ -310,10 +328,11 @@ fun BacktestScreen() {
     EquityChart(r.map { it.result }, colors)
     Spacer(Modifier.height(12.dp))
     Column(Modifier.horizontalScroll(rememberScrollState())) {
-        TableRow(listOf("", "Return", "Yearly", "Worst drop", "Trades", "Stops", "Invested"), header = true)
+        TableRow(listOf("", "Return", "Worst drop", "Trades", "Win rate", "Stops", "Invested"), header = true)
         r.forEachIndexed { i, row ->
             val m = row.metrics
-            TableRow(listOf(row.name, pct(m.totalReturn), pct(m.cagr), pct(m.maxDrawdown), "${m.trades}", "${m.stopOuts}", pct(m.timeInMarket)), color = colors[i])
+            TableRow(listOf(row.name, pct(m.totalReturn), pct(m.maxDrawdown), "${m.trades}",
+                if (m.winRate.isNaN()) "-" else pct(m.winRate), "${m.stopOuts}", pct(m.timeInMarket)), color = colors[i])
         }
     }
     Spacer(Modifier.height(12.dp))
@@ -378,6 +397,12 @@ fun SettingsScreen() {
     var slow by remember { mutableStateOf(current.slow.toString()) }
     var cap by remember { mutableStateOf((current.maxPositionPct * 100).toInt().toString()) }
     var stop by remember { mutableStateOf((current.stopLossPct * 100).toInt().toString()) }
+    var mode by remember { mutableStateOf(current.mode) }
+    var rsi by remember { mutableStateOf(current.scalp.rsiBuy.toInt().toString()) }
+    var tp by remember { mutableStateOf(trim(current.scalp.takeProfitPct * 100)) }
+    var sStop by remember { mutableStateOf(trim(current.scalp.stopPct * 100)) }
+    var hold by remember { mutableStateOf(trim(current.scalp.maxHoldBars / 4.0)) }
+    var trendFilter by remember { mutableStateOf(current.scalp.trendFilter) }
     var message by remember { mutableStateOf<String?>(null) }
     var amountMessage by remember { mutableStateOf<String?>(null) }
     var amount by remember { mutableStateOf(BotStore.startingAmount(context).takeIf { it > 0 }?.toInt()?.toString() ?: "") }
@@ -422,23 +447,47 @@ fun SettingsScreen() {
 
     Spacer(Modifier.height(24.dp))
     Text("Strategy", style = MaterialTheme.typography.titleMedium)
-    Text("Buys when the fast moving average of daily closes rises above the slow one, sells when it drops below.",
+    Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = mode == "trend", onClick = { mode = "trend" }, label = { Text("Trend (daily)") })
+        FilterChip(selected = mode == "scalp", onClick = { mode = "scalp" }, label = { Text("Scalp (15-min)") })
+    }
+    Text(if (mode == "scalp") "Buys sharp dips on 15-minute candles (RSI below your level) and sells quickly at a small " +
+            "gain, a small loss, or a time limit. Trades often, so fees matter a lot."
+        else "Buys when the fast moving average of daily closes rises above the slow one, sells when it drops below. Trades a few times a year.",
         style = MaterialTheme.typography.bodySmall)
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BotStore.symbols.forEach { FilterChip(selected = symbol == it, onClick = { symbol = it }, label = { Text(it) }) }
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        NumberField("Fast (days)", fast, Modifier.weight(1f)) { fast = it }
-        NumberField("Slow (days)", slow, Modifier.weight(1f)) { slow = it }
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        NumberField("Max position %", cap, Modifier.weight(1f)) { cap = it }
-        NumberField("Stop loss %", stop, Modifier.weight(1f)) { stop = it }
+    if (mode == "scalp") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Buy when RSI below", rsi, Modifier.weight(1f)) { rsi = it }
+            NumberField("Max hold (hours)", hold, Modifier.weight(1f), decimal = true) { hold = it }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Take profit %", tp, Modifier.weight(1f), decimal = true) { tp = it }
+            NumberField("Stop loss %", sStop, Modifier.weight(1f), decimal = true) { sStop = it }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+            Text("Only buy dips while the 2-day trend is up", Modifier.weight(1f))
+            Switch(checked = trendFilter, onCheckedChange = { trendFilter = it })
+        }
+        NumberField("Max position %", cap, Modifier.fillMaxWidth()) { cap = it }
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Fast (days)", fast, Modifier.weight(1f)) { fast = it }
+            NumberField("Slow (days)", slow, Modifier.weight(1f)) { slow = it }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Max position %", cap, Modifier.weight(1f)) { cap = it }
+            NumberField("Stop loss %", stop, Modifier.weight(1f)) { stop = it }
+        }
     }
     Button(onClick = {
         message = try {
             val s = Settings(symbol = symbol, fast = fast.toInt(), slow = slow.toInt(),
-                maxPositionPct = cap.toDouble() / 100, stopLossPct = stop.toDouble() / 100)
+                maxPositionPct = cap.toDouble() / 100, stopLossPct = stop.toDouble() / 100, mode = mode,
+                scalp = ScalpSettings(rsiBuy = rsi.toDouble(), takeProfitPct = tp.toDouble() / 100, stopPct = sStop.toDouble() / 100,
+                    maxHoldBars = maxOf(1, Math.round(hold.toDouble() * 4).toInt()), trendFilter = trendFilter))
             BotStore.saveSettings(context, s)
             "Saved. The bot uses these from its next check."
         } catch (e: Exception) {
@@ -449,9 +498,15 @@ fun SettingsScreen() {
 }
 
 @Composable
-private fun NumberField(label: String, value: String, modifier: Modifier, onChange: (String) -> Unit) {
-    OutlinedTextField(value, { onChange(it.filter(Char::isDigit)) }, label = { Text(label) }, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = modifier)
+private fun NumberField(label: String, value: String, modifier: Modifier, decimal: Boolean = false, onChange: (String) -> Unit) {
+    OutlinedTextField(value, { input ->
+        val cleaned = input.filter { it.isDigit() || (decimal && it == '.') }
+        if (cleaned.count { it == '.' } <= 1) onChange(cleaned)
+    }, label = { Text(label) }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number), modifier = modifier)
 }
+
+/** 1.5 -> "1.5", 2.0 -> "2" */
+private fun trim(v: Double) = if (v == Math.floor(v)) v.toInt().toString() else "%.2f".format(java.util.Locale.US, v).trimEnd('0')
 
 fun pct(v: Double, decimals: Int = 0) = "%.${decimals}f%%".format(v * 100)

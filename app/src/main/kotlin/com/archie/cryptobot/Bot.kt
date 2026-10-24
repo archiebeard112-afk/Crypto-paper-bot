@@ -20,6 +20,9 @@ import bot.Decision
 import bot.Position
 import bot.ProfitLoss
 import bot.ProfitLossCalc
+import bot.Scalp
+import bot.Settings
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -38,7 +41,7 @@ object Bot {
 
     /**
      * One pass of the bot: read the paper account and prices, decide, and (if [trade]) place paper orders.
-     * Also makes sure a resting stop-loss order exists while a position is open.
+     * Also makes sure a resting exit order (stop-loss or take-profit) exists while a position is open.
      */
     fun runOnce(context: Context, trade: Boolean): Snapshot {
         val keys = KeyVault.load(context) ?: error("Add your Alpaca paper API keys in Settings first")
@@ -49,8 +52,14 @@ object Bot {
         val equity = account.getDouble("equity")
         val cash = account.optDouble("non_marginable_buying_power", account.getDouble("cash"))
         val now = Instant.now().epochSecond
-        val bars = api.dailyBars(s.symbol, Instant.ofEpochSecond(now - (s.slow * 3L / 2 + 10) * DAY))
-            .filter { it.time + DAY <= now } // only finished daily bars
+        val scalp = s.mode == "scalp"
+        val bars = if (scalp) {
+            api.bars(s.symbol, "15Min", Instant.ofEpochSecond(now - 4 * DAY))
+                .filter { it.time + Scalp.BAR_SECONDS <= now } // only finished candles
+        } else {
+            api.dailyBars(s.symbol, Instant.ofEpochSecond(now - (s.slow * 3L / 2 + 10) * DAY))
+                .filter { it.time + DAY <= now }
+        }
         val price = api.latestPrice(s.symbol)
         val pos = api.position(s.symbol)
         val position = pos?.let { Position(it.getDouble("qty"), it.getDouble("avg_entry_price")) }
@@ -60,9 +69,16 @@ object Bot {
         val botEquity = pl?.let { minOf(it.currentValue, equity) } ?: equity
         val botCash = pl?.let { minOf(it.cash, cash).coerceAtLeast(0.0) } ?: cash
 
-        val action = Decision.decide(s, bars, price, position, botEquity, botCash) { since ->
-            api.orders(s.symbol, "closed", Instant.ofEpochSecond(since)).any {
-                it.optString("side") == "sell" && it.optDouble("filled_qty", 0.0) > 0
+        val action = if (scalp) {
+            val entryTime = if (pos == null) null else api.orders(s.symbol, "closed")
+                .firstOrNull { it.optString("side") == "buy" && !it.isNull("filled_at") }
+                ?.let { Instant.parse(it.getString("filled_at")).epochSecond }
+            Scalp.decide(s, bars, price, position, entryTime, now, botEquity, botCash)
+        } else {
+            Decision.decide(s, bars, price, position, botEquity, botCash) { since ->
+                api.orders(s.symbol, "closed", Instant.ofEpochSecond(since)).any {
+                    it.optString("side") == "sell" && it.optDouble("filled_qty", 0.0) > 0
+                }
             }
         }
         if (!trade) return Snapshot(equity, cash, price, position, action)
@@ -71,6 +87,15 @@ object Bot {
             is Action.Buy -> {
                 api.buyNotional(s.symbol, action.notional)
                 record(context, "BUY ${Decision.money(action.notional)} of ${s.symbol} at about ${Decision.money(price)}. ${action.reason}", notify = true)
+                if (scalp) {
+                    // Rest the take-profit as soon as the buy fills, so a quick bounce isn't missed between checks.
+                    repeat(10) {
+                        Thread.sleep(1_000)
+                        val filled = api.position(s.symbol) ?: return@repeat
+                        ensureExitOrder(api, s, filled)
+                        return Snapshot(equity, cash, price, position, action)
+                    }
+                }
             }
             is Action.Sell -> {
                 api.orders(s.symbol, "open").forEach { api.cancelOrder(it.getString("id")) }
@@ -78,7 +103,7 @@ object Bot {
                 record(context, "SELL all ${s.symbol} at about ${Decision.money(price)}. ${action.reason}", notify = true)
             }
             is Action.Hold -> {
-                if (pos != null) ensureStopOrder(api, s.symbol, pos.optString("qty_available", pos.getString("qty")), position!!.entryPrice * (1 - s.stopLossPct))
+                if (pos != null) ensureExitOrder(api, s, pos)
                 record(context, "${s.symbol} ${Decision.money(price)}: ${action.reason}", notify = false)
             }
         }
@@ -95,12 +120,28 @@ object Bot {
         return ProfitLossCalc.compute(start, fills, prices)
     }
 
-    private fun ensureStopOrder(api: AlpacaClient, symbol: String, qty: String, stop: Double) {
-        val hasStop = api.orders(symbol, "open").any { it.optString("side") == "sell" && it.optString("type").startsWith("stop") }
-        if (!hasStop && (qty.toDoubleOrNull() ?: 0.0) > 0) {
+    /**
+     * Keeps one resting exit order at Alpaca while a position is open: a take-profit limit in scalp mode,
+     * a stop-limit in trend mode. Any other open sell order for the coin is cancelled first, since it
+     * would hold the same coins.
+     */
+    private fun ensureExitOrder(api: AlpacaClient, s: Settings, pos: JSONObject) {
+        val scalp = s.mode == "scalp"
+        val wanted = if (scalp) "limit" else "stop_limit"
+        val sells = api.orders(s.symbol, "open").filter { it.optString("side") == "sell" }
+        if (sells.any { it.optString("type") == wanted }) return
+        sells.forEach { api.cancelOrder(it.getString("id")) }
+        if (sells.isNotEmpty()) Thread.sleep(1_000) // let the cancels release the coins
+        val qty = (if (sells.isEmpty()) pos.optString("qty_available", pos.getString("qty")) else pos.getString("qty"))
+        if ((qty.toDoubleOrNull() ?: 0.0) <= 0) return
+        val entry = pos.getDouble("avg_entry_price")
+        if (scalp) {
+            api.limitSell(s.symbol, qty, entry * (1 + s.scalp.takeProfitPct))
+        } else {
             // The limit sits 2% under the stop so the order still fills in a fast drop. The bot also
             // checks the stop itself every run, in case the price gaps past the limit.
-            api.stopLimitSell(symbol, qty, stop, stop * 0.98)
+            val stop = entry * (1 - s.stopLossPct)
+            api.stopLimitSell(s.symbol, qty, stop, stop * 0.98)
         }
     }
 

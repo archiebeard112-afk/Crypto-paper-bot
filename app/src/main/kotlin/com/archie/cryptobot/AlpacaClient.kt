@@ -92,6 +92,12 @@ class AlpacaClient(private val keys: ApiKeys?) {
             .put("time_in_force", "gtc")
             .put("stop_price", price(stop)).put("limit_price", price(limit)))!!)
 
+    /** Resting take-profit sell. */
+    fun limitSell(symbol: String, qty: String, limit: Double): JSONObject =
+        JSONObject(request("POST", "$PAPER_URL/v2/orders", JSONObject()
+            .put("symbol", symbol).put("qty", qty).put("side", "sell").put("type", "limit")
+            .put("time_in_force", "gtc").put("limit_price", price(limit)))!!)
+
     private fun price(v: Double) = if (v >= 100) "%.2f".format(java.util.Locale.US, v) else "%.6f".format(java.util.Locale.US, v)
 
     /** Every filled order (all coins) since [after], oldest first. */
@@ -121,11 +127,14 @@ class AlpacaClient(private val keys: ApiKeys?) {
 
     // ---- market data (public) ----
 
-    fun dailyBars(symbol: String, start: Instant): List<Bar> {
+    fun dailyBars(symbol: String, start: Instant) = bars(symbol, "1Day", start)
+
+    /** Candles for [timeframe] such as "1Day" or "15Min", oldest first. */
+    fun bars(symbol: String, timeframe: String, start: Instant): List<Bar> {
         val bars = mutableListOf<Bar>()
         var token: String? = null
         do {
-            var url = "$DATA_URL/v1beta3/crypto/us/bars?symbols=${enc(symbol)}&timeframe=1Day" +
+            var url = "$DATA_URL/v1beta3/crypto/us/bars?symbols=${enc(symbol)}&timeframe=$timeframe" +
                 "&start=${enc(start.toString())}&limit=10000&sort=asc"
             if (token != null) url += "&page_token=${enc(token)}"
             val page = JSONObject(request("GET", url) ?: "{}")

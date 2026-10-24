@@ -20,6 +20,8 @@ class ScalpReportTest {
 
     @Test fun printScalpReport() {
         val root = System.getenv("SCALP_DATA_DIR")?.let(::File) ?: return
+        val out = StringBuilder()
+        fun println(line: String) { kotlin.io.println(line); out.appendLine(line) }
         val base = Settings(mode = "scalp", maxPositionPct = 1.0)
         val variants = listOf(
             "Default (RSI<30, +1.5% / -1.5%, 6h, trend filter)" to base,
@@ -44,5 +46,6 @@ class ScalpReportTest {
             row("Buy and hold", bh)
             for ((name, s) in variants) row(name, Scalp.backtest(bars, s))
         }
+        File(root, "report.txt").writeText(out.toString())
     }
 }

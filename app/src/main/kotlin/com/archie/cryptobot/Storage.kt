@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import bot.ScalpSettings
 import bot.Settings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -76,6 +77,14 @@ object BotStore {
                 slow = p.getInt("slow", d.slow),
                 maxPositionPct = p.getFloat("cap", d.maxPositionPct.toFloat()).toDouble(),
                 stopLossPct = p.getFloat("stop", d.stopLossPct.toFloat()).toDouble(),
+                mode = p.getString("mode", d.mode)!!,
+                scalp = ScalpSettings(
+                    rsiBuy = p.getFloat("s_rsi", d.scalp.rsiBuy.toFloat()).toDouble(),
+                    takeProfitPct = p.getFloat("s_tp", d.scalp.takeProfitPct.toFloat()).toDouble(),
+                    stopPct = p.getFloat("s_stop", d.scalp.stopPct.toFloat()).toDouble(),
+                    maxHoldBars = p.getInt("s_hold", d.scalp.maxHoldBars),
+                    trendFilter = p.getBoolean("s_trend", d.scalp.trendFilter),
+                ),
             )
         } catch (e: IllegalArgumentException) {
             d
@@ -85,6 +94,10 @@ object BotStore {
     fun saveSettings(c: Context, s: Settings) = prefs(c).edit()
         .putString("symbol", s.symbol).putInt("fast", s.fast).putInt("slow", s.slow)
         .putFloat("cap", s.maxPositionPct.toFloat()).putFloat("stop", s.stopLossPct.toFloat())
+        .putString("mode", s.mode)
+        .putFloat("s_rsi", s.scalp.rsiBuy.toFloat()).putFloat("s_tp", s.scalp.takeProfitPct.toFloat())
+        .putFloat("s_stop", s.scalp.stopPct.toFloat()).putInt("s_hold", s.scalp.maxHoldBars)
+        .putBoolean("s_trend", s.scalp.trendFilter)
         .apply()
 
     /** The amount the bot trades with and measures profit against; 0 means "use the whole account". */
