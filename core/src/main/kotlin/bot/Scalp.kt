@@ -153,7 +153,12 @@ object Scalp {
         val closes = completedBars.map { it.close }.toDoubleArray()
         if (!signal(closes, p).last()) {
             val r = rsi(closes).last()
-            return Action.Hold("No dip: RSI ${"%.0f".format(r)} (buys below ${"%.0f".format(p.rsiBuy)})")
+            val avg = Strategy.sma(closes, TREND_BARS).last()
+            return Action.Hold(
+                if (r >= p.rsiBuy) "No dip: RSI ${"%.0f".format(r)} (buys below ${"%.0f".format(p.rsiBuy)})"
+                else "Dip found (RSI ${"%.0f".format(r)}), but the price is below its 2-day average " +
+                    "(${Decision.money(avg)}), so the trend filter is waiting for the slide to stop"
+            )
         }
         val notional = kotlin.math.floor(min(equity * s.maxPositionPct, cash) * 100) / 100
         if (notional < 10) return Action.Hold("Not enough cash to buy (${Decision.money(notional)})")

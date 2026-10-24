@@ -49,6 +49,13 @@ class ScalpTest {
         assertEquals(0, r.trades.size)
     }
 
+    @Test fun explainsTrendFilterWait() {
+        val bars = dipThenRebound(200.0).take(231)
+        val a = Scalp.decide(noFilter.copy(scalp = ScalpSettings(trendFilter = true)), bars, 93.8, null, null, 0, 1000.0, 1000.0)
+        assertIs<Action.Hold>(a)
+        assertTrue(a.reason.startsWith("Dip found"), a.reason)
+    }
+
     @Test fun liveDecision() {
         val bars = dipThenRebound(200.0).take(231)
         assertIs<Action.Buy>(Scalp.decide(noFilter, bars, 93.8, null, null, 0, 1000.0, 1000.0))
