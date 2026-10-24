@@ -1,0 +1,37 @@
+name: Fetch research data
+
+# Downloads daily and hourly candles (2020 onward) from Binance's public archive and
+# publishes them as the "research-data" release, for offline strategy research.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download
+        run: |
+          for sym in BTCUSDT ETHUSDT SOLUSDT; do
+            for tf in 1d 1h; do
+              mkdir -p data/$sym/$tf
+              m=2020-01
+              while [ "$m" \< "$(date -u +%Y-%m)" ]; do
+                curl -fsSL -o /tmp/k.zip "https://data.binance.vision/data/spot/monthly/klines/$sym/$tf/$sym-$tf-$m.zip" \
+                  && unzip -o -q /tmp/k.zip -d data/$sym/$tf || echo "missing $sym $tf $m"
+                m=$(date -u -d "$m-01 +1 month" +%Y-%m)
+              done
+            done
+          done
+          (cd data && zip -q -r ../research-data.zip .)
+          ls -l research-data.zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete research-data --yes --cleanup-tag || true
+          gh release create research-data research-data.zip --prerelease --title "Research data" \
+            --notes "Binance daily and hourly candles for BTC, ETH and SOL since 2020."
