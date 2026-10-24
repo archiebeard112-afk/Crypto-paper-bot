@@ -9,6 +9,7 @@ An Android app that runs a simple crypto trading strategy on an **Alpaca paper a
   - Position cap: a buy uses at most 50% of account equity (adjustable). The cap applies when buying; a winning position can grow past it.
   - Stop loss: sell if the price falls 15% below the entry price (adjustable). A stop-limit order rests at Alpaca, and the bot also checks the stop itself every 15 minutes.
   - After an exit, no re-entry until the next fresh cross up.
+- **Scalp mode (optional):** on 15-minute candles, buys sharp dips (RSI below 30, only while the ~2-day trend is up), then sells at +1.5% (a resting limit order), -1.5%, or after 6 hours. All adjustable.
 - **Runs in the background** every 15 minutes (Android's minimum) and sends a notification for every trade.
 - **Starting amount and profit/loss:** set how much paper money the bot trades with; the Bot tab shows profit or loss since then (closed trades and open position), plus the whole account's value over the last month.
 - **Backtest tab:** replays the strategy on daily history from Alpaca and compares it with buy-and-hold, including fees.
@@ -35,6 +36,18 @@ Monthly Bitcoin closes, Oct 2012 to Dec 2024, 2/10-month crossover, 0.25% fee pe
 | Crossover, 50% cap + 15% stop | 42,998%      | 64.6%    | -60.8%     | 7      |
 
 The crossover did **not** beat buy-and-hold. It cut the worst drop somewhat, and the stop loss and position cap made returns lower because Bitcoin's dips are often deeper than 15% before it recovers. Run the in-app backtest for daily results on whichever coin you pick. Past results don't predict future ones.
+
+### Scalp mode, last 12 months of real 15-minute candles
+
+Oct 2025 to Sep 2026, Binance data, all-in, default settings (`.github/workflows/research.yml` reruns this on every change to `core/`):
+
+|          | Buy and hold | Scalp at 0.25% fee | Scalp at 0.10% fee | Scalp with no fees | Scalp without trend filter |
+|----------|-------------:|-------------------:|-------------------:|-------------------:|---------------------------:|
+| BTC      | -30.6%       | -11.7%             | -3.6%              | +2.1%              | -83.2%                     |
+| ETH      | -40.4%       | -5.8%              | +5.9%              | +14.4%             | -85.3%                     |
+| SOL      | -49.2%       | -5.7%              | +4.1%              | +11.2%             | -84.5%                     |
+
+In a falling year the scalper lost much less than holding, mostly because the trend filter kept it out of the market 98% of the time. It still lost money at Alpaca's fee: about 0.5% per round trip wipes out most of a 1.5% target. Without the trend filter it bought every dip on the way down and lost over 80%.
 
 ## Project layout
 
