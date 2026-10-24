@@ -1,0 +1,13 @@
+name: Signal check
+
+# Shows what the bot would decide right now for each coin (public Alpaca data, no keys).
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/signal_check.py
+      - run: echo "::notice title=Signal check::$(sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g' signal_report.txt)"
