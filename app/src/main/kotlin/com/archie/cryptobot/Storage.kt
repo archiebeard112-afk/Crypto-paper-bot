@@ -84,6 +84,7 @@ object BotStore {
                     stopPct = p.getFloat("s_stop", d.scalp.stopPct.toFloat()).toDouble(),
                     maxHoldBars = p.getInt("s_hold", d.scalp.maxHoldBars),
                     trendFilter = p.getBoolean("s_trend", d.scalp.trendFilter),
+                    entry = p.getString("s_entry", d.scalp.entry)!!,
                 ),
             )
         } catch (e: IllegalArgumentException) {
@@ -97,7 +98,7 @@ object BotStore {
         .putString("mode", s.mode)
         .putFloat("s_rsi", s.scalp.rsiBuy.toFloat()).putFloat("s_tp", s.scalp.takeProfitPct.toFloat())
         .putFloat("s_stop", s.scalp.stopPct.toFloat()).putInt("s_hold", s.scalp.maxHoldBars)
-        .putBoolean("s_trend", s.scalp.trendFilter)
+        .putBoolean("s_trend", s.scalp.trendFilter).putString("s_entry", s.scalp.entry)
         .apply()
 
     /** The amount the bot trades with and measures profit against; 0 means "use the whole account". */

@@ -9,7 +9,7 @@ An Android app that runs a simple crypto trading strategy on an **Alpaca paper a
   - Position cap: a buy uses at most 50% of account equity (adjustable). The cap applies when buying; a winning position can grow past it.
   - Stop loss: sell if the price falls 15% below the entry price (adjustable). A stop-limit order rests at Alpaca, and the bot also checks the stop itself every 15 minutes.
   - After an exit, no re-entry until the next fresh cross up.
-- **Scalp mode (optional):** on 15-minute candles, buys sharp dips (RSI below 30, only while the ~2-day trend is up), then sells at +1.5% (a resting limit order), -1.5%, or after 6 hours. All adjustable.
+- **Scalp mode (optional):** on 15-minute candles, buys sharp dips (RSI below 30, only while the ~2-day trend is up), then sells at +1.5% (a resting limit order), -1.5%, or after 6 hours. Optional "dip then turn up" entry waits for the price to start rising first. All adjustable.
 - **Runs in the background** every 15 minutes (Android's minimum) and sends a notification for every trade.
 - **Starting amount and profit/loss:** set how much paper money the bot trades with; the Bot tab shows profit or loss since then (closed trades and open position), plus the whole account's value over the last month.
 - **Backtest tab:** replays the strategy on daily history from Alpaca and compares it with buy-and-hold, including fees.
@@ -48,6 +48,16 @@ Oct 2025 to Sep 2026, Binance data, all-in, default settings (`.github/workflows
 | SOL      | -49.2%       | -5.7%              | +4.1%              | +11.2%             | -84.5%                     |
 
 In a falling year the scalper lost much less than holding, mostly because the trend filter kept it out of the market 98% of the time. It still lost money at Alpaca's fee: about 0.5% per round trip wipes out most of a 1.5% target. Without the trend filter it bought every dip on the way down and lost over 80%.
+
+**Dip then turn up** (scalp option): instead of buying while RSI is below 30, wait until, within 2 hours of such a dip, the 9-candle average crosses above the 21-candle average. Same 12 months, 0.25% fee, all-in:
+
+|     | Buy the dip, no filter | Dip then turn up, no filter | Buy the dip + trend filter | Dip then turn up + trend filter |
+|-----|-----:|-----:|-----:|-----:|
+| BTC | -83.2% | -11.7% | -11.7% | -3.3% |
+| ETH | -85.3% | -20.9% | -5.8% | -10.2% |
+| SOL | -84.5% | -12.3% | -5.7% | -5.6% |
+
+Waiting for the turn up avoids most falling knives, but it did not reliably beat the trend filter, and none of the versions made money after fees. The filtered versions trade only 7 to 39 times a year, so differences between them are mostly luck.
 
 ## Project layout
 

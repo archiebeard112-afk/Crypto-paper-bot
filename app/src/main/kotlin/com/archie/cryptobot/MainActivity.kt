@@ -127,7 +127,7 @@ fun BotScreen() {
     val s = BotStore.settings(context)
     val hasKeys = KeyVault.load(context) != null
 
-    Text(if (s.mode == "scalp") "${s.symbol}  ·  Scalp: RSI<${s.scalp.rsiBuy.toInt()}, +${pct(s.scalp.takeProfitPct, 1)} / -${pct(s.scalp.stopPct, 1)}, " +
+    Text(if (s.mode == "scalp") "${s.symbol}  ·  Scalp${if (s.scalp.entry == "reversal") " (dip then turn up)" else ""}: RSI<${s.scalp.rsiBuy.toInt()}, +${pct(s.scalp.takeProfitPct, 1)} / -${pct(s.scalp.stopPct, 1)}, " +
             "max ${s.scalp.maxHoldBars * 15 / 60.0}h  ·  cap ${pct(s.maxPositionPct)}"
         else "${s.symbol}  ·  Trend: SMA ${s.fast}/${s.slow} days  ·  cap ${pct(s.maxPositionPct)}  ·  stop ${pct(s.stopLossPct)}",
         style = MaterialTheme.typography.bodyMedium)
@@ -297,7 +297,8 @@ fun BacktestScreen() {
                         return@withContext listOf(
                             "Buy and hold" to Scalp.buyAndHold(bars, s),
                             "Your settings, if trading were free" to Scalp.backtest(bars, s.copy(feePct = 0.0)),
-                            "Your settings, all-in" to Scalp.backtest(bars, s.copy(maxPositionPct = 1.0)),
+                            (if (s.scalp.entry == "reversal") "Same, but buy the dip itself" else "Same, but wait for the turn up") to
+                                Scalp.backtest(bars, s.copy(scalp = s.scalp.copy(entry = if (s.scalp.entry == "reversal") "dip" else "reversal"))),
                             "Your settings" to Scalp.backtest(bars, s),
                         ).map { (n, r) -> BacktestRow(n, r, Backtest.metrics(r, 365.0 * 96)) }
                     }
@@ -403,6 +404,7 @@ fun SettingsScreen() {
     var sStop by remember { mutableStateOf(trim(current.scalp.stopPct * 100)) }
     var hold by remember { mutableStateOf(trim(current.scalp.maxHoldBars / 4.0)) }
     var trendFilter by remember { mutableStateOf(current.scalp.trendFilter) }
+    var entry by remember { mutableStateOf(current.scalp.entry) }
     var message by remember { mutableStateOf<String?>(null) }
     var amountMessage by remember { mutableStateOf<String?>(null) }
     var amount by remember { mutableStateOf(BotStore.startingAmount(context).takeIf { it > 0 }?.toInt()?.toString() ?: "") }
@@ -459,6 +461,14 @@ fun SettingsScreen() {
         BotStore.symbols.forEach { FilterChip(selected = symbol == it, onClick = { symbol = it }, label = { Text(it) }) }
     }
     if (mode == "scalp") {
+        Text("When to buy", style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = entry == "dip", onClick = { entry = "dip" }, label = { Text("Buy the dip") })
+            FilterChip(selected = entry == "reversal", onClick = { entry = "reversal" }, label = { Text("Dip then turn up") })
+        }
+        Text(if (entry == "reversal") "Waits until, within 2 hours of a dip, the 9-candle average crosses above the 21-candle " +
+                "average: a sign the price has started rising again."
+            else "Buys as soon as RSI drops below your level.", style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NumberField("Buy when RSI below", rsi, Modifier.weight(1f)) { rsi = it }
             NumberField("Max hold (hours)", hold, Modifier.weight(1f), decimal = true) { hold = it }
@@ -487,7 +497,7 @@ fun SettingsScreen() {
             val s = Settings(symbol = symbol, fast = fast.toInt(), slow = slow.toInt(),
                 maxPositionPct = cap.toDouble() / 100, stopLossPct = stop.toDouble() / 100, mode = mode,
                 scalp = ScalpSettings(rsiBuy = rsi.toDouble(), takeProfitPct = tp.toDouble() / 100, stopPct = sStop.toDouble() / 100,
-                    maxHoldBars = maxOf(1, Math.round(hold.toDouble() * 4).toInt()), trendFilter = trendFilter))
+                    maxHoldBars = maxOf(1, Math.round(hold.toDouble() * 4).toInt()), trendFilter = trendFilter, entry = entry))
             BotStore.saveSettings(context, s)
             "Saved. The bot uses these from its next check."
         } catch (e: Exception) {
