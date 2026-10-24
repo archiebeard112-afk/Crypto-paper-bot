@@ -1,0 +1,33 @@
+name: Scalp research
+
+# Backtests the scalp mode on the last 12 months of real 15-minute candles from Binance's public data archive.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["core/**", ".github/workflows/research.yml"]
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Download 15-minute candles
+        run: |
+          for sym in BTCUSDT ETHUSDT SOLUSDT; do
+            mkdir -p data/$sym
+            for i in $(seq 1 12); do
+              m=$(date -u -d "$(date -u +%Y-%m-01) -$i month" +%Y-%m)
+              curl -fsSL -o /tmp/k.zip "https://data.binance.vision/data/spot/monthly/klines/$sym/15m/$sym-15m-$m.zip" \
+                && unzip -o -q /tmp/k.zip -d data/$sym || echo "missing $sym $m"
+            done
+          done
+      - name: Run scalp backtest
+        env:
+          SCALP_DATA_DIR: ${{ github.workspace }}/data
+        run: ./gradlew :core:test --tests 'bot.ScalpReportTest' --rerun
