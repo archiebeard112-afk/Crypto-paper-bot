@@ -87,6 +87,12 @@ object BotStore {
         .putFloat("cap", s.maxPositionPct.toFloat()).putFloat("stop", s.stopLossPct.toFloat())
         .apply()
 
+    /** The amount the bot trades with and measures profit against; 0 means "use the whole account". */
+    fun startingAmount(c: Context) = prefs(c).getString("start_amount", "0")!!.toDouble()
+    fun startTime(c: Context) = prefs(c).getLong("start_time", 0L)
+    fun setStartingAmount(c: Context, amount: Double) = prefs(c).edit()
+        .putString("start_amount", amount.toString()).putLong("start_time", System.currentTimeMillis()).apply()
+
     fun isEnabled(c: Context) = prefs(c).getBoolean("enabled", false)
     fun setEnabled(c: Context, on: Boolean) = prefs(c).edit().putBoolean("enabled", on).apply()
 

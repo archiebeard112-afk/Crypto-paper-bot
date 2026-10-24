@@ -10,6 +10,7 @@ An Android app that runs a simple crypto trading strategy on an **Alpaca paper a
   - Stop loss: sell if the price falls 15% below the entry price (adjustable). A stop-limit order rests at Alpaca, and the bot also checks the stop itself every 15 minutes.
   - After an exit, no re-entry until the next fresh cross up.
 - **Runs in the background** every 15 minutes (Android's minimum) and sends a notification for every trade.
+- **Starting amount and profit/loss:** set how much paper money the bot trades with; the Bot tab shows profit or loss since then (closed trades and open position), plus the whole account's value over the last month.
 - **Backtest tab:** replays the strategy on daily history from Alpaca and compares it with buy-and-hold, including fees.
 
 Coins: BTC, ETH, SOL, LTC and DOGE against USD.

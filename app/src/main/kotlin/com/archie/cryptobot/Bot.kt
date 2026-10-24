@@ -18,6 +18,8 @@ import androidx.work.WorkerParameters
 import bot.Action
 import bot.Decision
 import bot.Position
+import bot.ProfitLoss
+import bot.ProfitLossCalc
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -53,7 +55,12 @@ object Bot {
         val pos = api.position(s.symbol)
         val position = pos?.let { Position(it.getDouble("qty"), it.getDouble("avg_entry_price")) }
 
-        val action = Decision.decide(s, bars, price, position, equity, cash) { since ->
+        // With a starting amount set, the bot only trades with that money plus its own profit or loss.
+        val pl = profitLoss(context, api)
+        val botEquity = pl?.let { minOf(it.currentValue, equity) } ?: equity
+        val botCash = pl?.let { minOf(it.cash, cash).coerceAtLeast(0.0) } ?: cash
+
+        val action = Decision.decide(s, bars, price, position, botEquity, botCash) { since ->
             api.orders(s.symbol, "closed", Instant.ofEpochSecond(since)).any {
                 it.optString("side") == "sell" && it.optDouble("filled_qty", 0.0) > 0
             }
@@ -76,6 +83,16 @@ object Bot {
             }
         }
         return Snapshot(equity, cash, price, position, action)
+    }
+
+    /** Profit and loss since the starting amount was set, or null if none is set. */
+    fun profitLoss(context: Context, api: AlpacaClient): ProfitLoss? {
+        val start = BotStore.startingAmount(context)
+        if (start <= 0) return null
+        val fills = api.filledOrdersSince(Instant.ofEpochMilli(BotStore.startTime(context)))
+        val net = fills.groupBy { it.symbol }.filterValues { fs -> fs.sumOf { if (it.side == "buy") it.qty else -it.qty } > 1e-9 }
+        val prices = if (net.isEmpty()) emptyMap() else api.latestPrices(net.keys.toList())
+        return ProfitLossCalc.compute(start, fills, prices)
     }
 
     private fun ensureStopOrder(api: AlpacaClient, symbol: String, qty: String, stop: Double) {

@@ -1,6 +1,7 @@
 package com.archie.cryptobot
 
 import bot.Bar
+import bot.Fill
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -93,6 +94,31 @@ class AlpacaClient(private val keys: ApiKeys?) {
 
     private fun price(v: Double) = if (v >= 100) "%.2f".format(java.util.Locale.US, v) else "%.6f".format(java.util.Locale.US, v)
 
+    /** Every filled order (all coins) since [after], oldest first. */
+    fun filledOrdersSince(after: Instant): List<Fill> {
+        val url = "$PAPER_URL/v2/orders?status=closed&limit=500&direction=asc&after=${enc(after.toString())}"
+        val arr = JSONArray(request("GET", url) ?: "[]")
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { it.optDouble("filled_qty", 0.0) > 0 && !it.isNull("filled_at") }
+            .map {
+                Fill(normalize(it.getString("symbol")), it.getString("side"), it.getDouble("filled_qty"),
+                    it.getDouble("filled_avg_price"), Instant.parse(it.getString("filled_at")).epochSecond)
+            }
+    }
+
+    /** Alpaca reports some crypto symbols as "BTCUSD"; map them back to "BTC/USD". */
+    private fun normalize(symbol: String) = BotStore.symbols.firstOrNull { sameSymbol(it, symbol) } ?: symbol
+
+    /** Daily value of the whole paper account over [period] (e.g. "1M", "3M", "1A"). */
+    fun portfolioHistory(period: String = "1M"): List<Pair<Long, Double>> {
+        val json = JSONObject(request("GET", "$PAPER_URL/v2/account/portfolio/history?period=$period&timeframe=1D") ?: "{}")
+        val ts = json.optJSONArray("timestamp") ?: return emptyList()
+        val eq = json.optJSONArray("equity") ?: return emptyList()
+        return (0 until minOf(ts.length(), eq.length()))
+            .filter { !eq.isNull(it) && eq.getDouble(it) > 0 }
+            .map { ts.getLong(it) to eq.getDouble(it) }
+    }
+
     // ---- market data (public) ----
 
     fun dailyBars(symbol: String, start: Instant): List<Bar> {
@@ -111,6 +137,12 @@ class AlpacaClient(private val keys: ApiKeys?) {
             token = page.optString("next_page_token").takeIf { it.isNotEmpty() && it != "null" }
         } while (token != null)
         return bars
+    }
+
+    fun latestPrices(symbols: List<String>): Map<String, Double> {
+        val json = JSONObject(request("GET", "$DATA_URL/v1beta3/crypto/us/latest/trades?symbols=${enc(symbols.joinToString(","))}") ?: "{}")
+        val trades = json.optJSONObject("trades") ?: return emptyMap()
+        return symbols.filter { trades.has(it) }.associateWith { trades.getJSONObject(it).getDouble("p") }
     }
 
     fun latestPrice(symbol: String): Double {

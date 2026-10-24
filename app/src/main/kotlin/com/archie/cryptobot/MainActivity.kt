@@ -63,6 +63,7 @@ import bot.Backtest
 import bot.BacktestResult
 import bot.Decision
 import bot.Metrics
+import bot.ProfitLoss
 import bot.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -132,6 +133,10 @@ fun BotScreen() {
         return
     }
 
+    var refresh by remember { mutableIntStateOf(0) }
+    ProfitLossCard(refresh)
+    Spacer(Modifier.height(16.dp))
+
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Bot running", fontWeight = FontWeight.Bold)
@@ -169,7 +174,7 @@ fun BotScreen() {
     Spacer(Modifier.height(20.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Activity", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        OutlinedButton(onClick = { log = BotStore.readLog(context) }) { Text("Refresh") }
+        OutlinedButton(onClick = { log = BotStore.readLog(context); refresh++ }) { Text("Refresh") }
     }
     if (log.isEmpty()) Text("Nothing yet.", style = MaterialTheme.typography.bodySmall)
     val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
@@ -180,6 +185,82 @@ fun BotScreen() {
         }
     }
 }
+
+private data class Overview(val pl: ProfitLoss?, val accountEquity: Double, val lastEquity: Double, val history: List<Pair<Long, Double>>)
+
+@Composable
+fun ProfitLossCard(refresh: Int) {
+    val context = LocalContext.current
+    var overview by remember { mutableStateOf<Overview?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(refresh) {
+        try {
+            overview = withContext(Dispatchers.IO) {
+                val api = AlpacaClient(KeyVault.load(context))
+                val acct = api.account()
+                Overview(Bot.profitLoss(context, api), acct.getDouble("equity"), acct.optDouble("last_equity", 0.0), api.portfolioHistory("1M"))
+            }
+            error = null
+        } catch (e: Exception) {
+            error = e.message
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Profit and loss", style = MaterialTheme.typography.titleMedium)
+            val o = overview
+            when {
+                error != null -> Text("Couldn't load: $error", color = MaterialTheme.colorScheme.error)
+                o == null -> Text("Loading…")
+                o.pl == null -> Text("Set a starting amount in Settings to track the bot's profit and loss.",
+                    style = MaterialTheme.typography.bodyMedium)
+                else -> {
+                    val pl = o.pl
+                    val since = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(BotStore.startTime(context)))
+                    Text(signedMoney(pl.total) + "  (" + (if (pl.total >= 0) "+" else "") + pct(pl.totalPct, 1) + ")",
+                        style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = gainColor(pl.total))
+                    Text("Started with ${Decision.money(pl.startingAmount)} on $since, now ${Decision.money(pl.currentValue)}")
+                    Text("Closed trades ${signedMoney(pl.realized)}  ·  Open position ${signedMoney(pl.unrealized)}",
+                        style = MaterialTheme.typography.bodySmall)
+                    pl.holdings.forEach {
+                        Text("Holding ${"%.6f".format(it.qty)} ${it.symbol.substringBefore('/')} worth ${Decision.money(it.value)} " +
+                            "(bought at ${Decision.money(it.avgCost)})", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            if (o != null) {
+                Spacer(Modifier.height(12.dp))
+                val today = o.accountEquity - o.lastEquity
+                Text("Whole paper account: ${Decision.money(o.accountEquity)}" +
+                    (if (o.lastEquity > 0) ", today ${signedMoney(today)}" else ""), style = MaterialTheme.typography.bodySmall)
+                if (o.history.size > 1) {
+                    Text("Last month", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
+                    LineChart(o.history.map { it.second }, gainColor(o.history.last().second - o.history.first().second))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LineChart(values: List<Double>, color: Color) {
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    Canvas(Modifier.fillMaxWidth().height(100.dp)) {
+        val lo = values.min()
+        val span = (values.max() - lo).takeIf { it > 0 } ?: 1.0
+        drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1f)
+        var prev: Offset? = null
+        values.forEachIndexed { i, v ->
+            val p = Offset(size.width * i / (values.size - 1), (size.height * (1 - (v - lo) / span)).toFloat())
+            prev?.let { drawLine(color, it, p, strokeWidth = 3f) }
+            prev = p
+        }
+    }
+}
+
+private fun gainColor(v: Double) = if (v >= 0) Color(0xFF2E7D32) else Color(0xFFC62828)
+
+private fun signedMoney(v: Double) = (if (v >= 0) "+" else "-") + Decision.money(kotlin.math.abs(v))
 
 private data class BacktestRow(val name: String, val result: BacktestResult, val metrics: Metrics)
 
@@ -298,6 +379,8 @@ fun SettingsScreen() {
     var cap by remember { mutableStateOf((current.maxPositionPct * 100).toInt().toString()) }
     var stop by remember { mutableStateOf((current.stopLossPct * 100).toInt().toString()) }
     var message by remember { mutableStateOf<String?>(null) }
+    var amountMessage by remember { mutableStateOf<String?>(null) }
+    var amount by remember { mutableStateOf(BotStore.startingAmount(context).takeIf { it > 0 }?.toInt()?.toString() ?: "") }
 
     Text("Alpaca paper keys", style = MaterialTheme.typography.titleMedium)
     Text("Sign up free at alpaca.markets, open your Paper account, and generate API keys there. " +
@@ -317,6 +400,25 @@ fun SettingsScreen() {
             message = "Keys saved. Use \"Check now\" on the Bot tab to test them."
         }, modifier = Modifier.padding(top = 8.dp)) { Text("Save keys") }
     }
+
+    Spacer(Modifier.height(24.dp))
+    Text("Starting amount", style = MaterialTheme.typography.titleMedium)
+    Text("The bot trades with this much of your paper money (plus whatever it gains or loses), and profit and loss " +
+        "is measured from it, starting when you save. To change the paper account's own balance, use Reset on your " +
+        "Paper account page at alpaca.markets.", style = MaterialTheme.typography.bodySmall)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NumberField("Amount ($)", amount, Modifier.weight(1f)) { amount = it }
+        Button(onClick = {
+            val v = amount.toDoubleOrNull() ?: 0.0
+            amountMessage = if (v < 10) "Enter at least $10." else {
+                BotStore.setStartingAmount(context, v)
+                "Starting amount set to ${Decision.money(v)}. Profit and loss counts from now."
+            }
+        }) { Text("Set") }
+    }
+    val savedAmount = BotStore.startingAmount(context)
+    if (savedAmount > 0) Text("Current: ${Decision.money(savedAmount)}", style = MaterialTheme.typography.bodySmall)
+    amountMessage?.let { Text(it, Modifier.padding(top = 4.dp)) }
 
     Spacer(Modifier.height(24.dp))
     Text("Strategy", style = MaterialTheme.typography.titleMedium)
