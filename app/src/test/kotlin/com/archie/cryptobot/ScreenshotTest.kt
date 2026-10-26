@@ -1,12 +1,8 @@
 package com.archie.cryptobot
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import bot.Fast
@@ -15,73 +11,31 @@ import bot.Metrics
 import bot.ProfitLoss
 import bot.Settings
 import bot.Tax
-import com.android.ide.common.rendering.api.SessionParams
 import org.junit.Rule
 import org.junit.Test
 import kotlin.math.exp
 import kotlin.math.sin
 
-/** Renders every screen with sample data, so the design can be reviewed without a phone. */
+/** Renders every screen with sample data on a phone-sized frame, page by page, so the design can be reviewed without a phone. */
 class ScreenshotTest {
-    @get:Rule
-    val paparazzi = Paparazzi(
-        deviceConfig = DeviceConfig.PIXEL_6.copy(screenHeight = 6000),
-        renderingMode = SessionParams.RenderingMode.SHRINK,
-        theme = "android:Theme.Material.NoActionBar",
-        showSystemUi = false,
-    )
-
-    private val settings = Samples.settings
-    private val home = Samples.home
-
-
-    private fun curve(n: Int, drift: Double, wobble: Double, phase: Double) =
-        DoubleArray(n) { 100_000 * exp(drift * it / n + wobble * sin(it / 9.0 + phase)) }
-
-    private val backtest = BacktestUi(
-        heading = "Fast · auto coin · last 7 days",
-        description = "Replays fast mode on 1-minute candles from Alpaca. If the stop and take-profit are both touched in " +
-            "the same minute, it assumes the stop hit first. Every fill pays a 0.25% fee.",
-        period = "2026-10-19 to 2026-10-26",
-        variants = listOf(
-            VariantUi("Buy and hold BTC", curve(200, 0.04, 0.03, 0.0), Metrics(0.041, 0.38, -0.061, 0.0, 0, 0, Double.NaN, 1.0)),
-            VariantUi("Auto coin, if trading were free", curve(200, 0.02, 0.01, 1.0), Metrics(0.021, 0.0, -0.032, 0.0, 31, 14, 0.52, 0.18)),
-            VariantUi("Same, BTC only", curve(200, -0.05, 0.01, 2.0), Metrics(-0.048, 0.0, -0.061, 0.0, 12, 9, 0.25, 0.06)),
-            VariantUi("Your settings (auto coin)", curve(200, -0.09, 0.01, 3.0), Metrics(-0.087, 0.0, -0.095, 0.0, 31, 22, 0.29, 0.18)),
-        ),
-        verdict = "Your settings trailed buy-and-hold here (-8.7% vs +4.1%), with a worst drop of -9.5% vs -6.1%. Past results " +
-            "don't predict future ones, and tuning settings until a backtest looks good usually makes live results worse.",
-    )
-
-    @Composable
-    private fun Page(content: @Composable ColumnScope.() -> Unit) = AppTheme {
-        Column(Modifier.background(Palette.Background).padding(16.dp), content = content)
-    }
-
-    @Test fun home() = paparazzi.snapshot { Page { HomeContent(home, {}, {}, {}, {}, {}) } }
-
-    @Test fun homeNoKeys() = paparazzi.snapshot { Page { HomeContent(home.copy(hasKeys = false), {}, {}, {}, {}, {}) } }
-
-    @Test fun backtest() = paparazzi.snapshot { Page { BacktestContent(backtest) {} } }
-
-    @Test fun settingsFast() = paparazzi.snapshot {
-        Page { SettingsContent(settings, true, 1000.0, Tax(0.22), { _, _ -> }, {}, {}, {}, {}) }
-    }
-
-    @Test fun settingsPortfolioNoKeys() = paparazzi.snapshot {
-        Page { SettingsContent(Settings(mode = "portfolio"), false, 0.0, Tax(0.22), { _, _ -> }, {}, {}, {}, {}) }
-    }
-}
-
-/** Phone-sized shots with the top bar and bottom navigation. */
-class FrameScreenshotTest {
     @get:Rule
     val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, theme = "android:Theme.Material.NoActionBar", showSystemUi = false)
 
-    @Test fun homeFrame() = paparazzi.snapshot {
-        AppTheme {
-            AppFrame(0, {}) { HomeContent(Samples.home, {}, {}, {}, {}, {}) }
-        }
+    private fun shot(name: String, tab: Int, page: Int, content: @Composable ColumnScope.() -> Unit) =
+        paparazzi.snapshot("$name-$page") { AppTheme { AppFrame(tab, {}, ScrollState(page * 1800), content) } }
+
+    @Test fun home() = (0..2).forEach { shot("home", 0, it) { HomeContent(Samples.home, {}, {}, {}, {}, {}) } }
+
+    @Test fun homeNoKeys() = shot("home-no-keys", 0, 0) { HomeContent(Samples.home.copy(hasKeys = false), {}, {}, {}, {}, {}) }
+
+    @Test fun backtest() = (0..2).forEach { shot("backtest", 1, it) { BacktestContent(Samples.backtest) {} } }
+
+    @Test fun settingsFast() = (0..3).forEach {
+        shot("settings-fast", 2, it) { SettingsContent(Samples.settings, true, 1000.0, Tax(0.22), { _, _ -> }, {}, {}, {}, {}) }
+    }
+
+    @Test fun settingsPortfolioNoKeys() = shot("settings-portfolio", 2, 0) {
+        SettingsContent(Settings(mode = "portfolio"), false, 0.0, Tax(0.22), { _, _ -> }, {}, {}, {}, {})
     }
 }
 
@@ -120,5 +74,23 @@ object Samples {
             BotStore.LogEntry(now - 3_600_000, "SELL all BTC/USD at about $67,410.00. Take profit at $67,410.00"),
             BotStore.LogEntry(now - 7_200_000, "Bot started"),
         ),
+    )
+
+    private fun curve(n: Int, drift: Double, wobble: Double, phase: Double) =
+        DoubleArray(n) { 100_000 * exp(drift * it / n + wobble * sin(it / 9.0 + phase)) }
+
+    val backtest = BacktestUi(
+        heading = "Fast · auto coin · last 7 days",
+        description = "Replays fast mode on 1-minute candles from Alpaca. If the stop and take-profit are both touched in " +
+            "the same minute, it assumes the stop hit first. Every fill pays a 0.25% fee.",
+        period = "2026-10-19 to 2026-10-26",
+        variants = listOf(
+            VariantUi("Buy and hold BTC", curve(200, 0.04, 0.03, 0.0), Metrics(0.041, 0.38, -0.061, 0.0, 0, 0, Double.NaN, 1.0)),
+            VariantUi("Auto coin, if trading were free", curve(200, 0.02, 0.01, 1.0), Metrics(0.021, 0.0, -0.032, 0.0, 31, 14, 0.52, 0.18)),
+            VariantUi("Same, BTC only", curve(200, -0.05, 0.01, 2.0), Metrics(-0.048, 0.0, -0.061, 0.0, 12, 9, 0.25, 0.06)),
+            VariantUi("Your settings (auto coin)", curve(200, -0.09, 0.01, 3.0), Metrics(-0.087, 0.0, -0.095, 0.0, 31, 22, 0.29, 0.18)),
+        ),
+        verdict = "Your settings trailed buy-and-hold here (-8.7% vs +4.1%), with a worst drop of -9.5% vs -6.1%. Past results " +
+            "don't predict future ones, and tuning settings until a backtest looks good usually makes live results worse.",
     )
 }

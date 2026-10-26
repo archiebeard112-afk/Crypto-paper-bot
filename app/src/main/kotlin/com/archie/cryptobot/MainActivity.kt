@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -93,7 +94,7 @@ fun App() {
 
 /** Top bar, scrolling content and bottom navigation; shared by the app and the screenshot tests. */
 @Composable
-fun AppFrame(tab: Int, onTab: (Int) -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun AppFrame(tab: Int, onTab: (Int) -> Unit, scroll: ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize().background(Palette.Background)) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(Palette.Accent.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
@@ -103,7 +104,7 @@ fun AppFrame(tab: Int, onTab: (Int) -> Unit, content: @Composable ColumnScope.()
             Text("Crypto Paper Bot", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Pill("Paper money", Palette.Warning)
         }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = 16.dp)) {
             content()
             Spacer(Modifier.height(24.dp))
         }
