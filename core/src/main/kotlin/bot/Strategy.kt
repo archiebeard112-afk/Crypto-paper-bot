@@ -15,9 +15,10 @@ data class Settings(
     val stopLossPct: Double = 0.15,
     /** Backtest cost per fill (exchange fee + slippage). Alpaca's crypto taker fee is up to 0.25%. */
     val feePct: Double = 0.0025,
-    /** "trend" (daily crossover above) or "scalp" (see [Scalp]). */
+    /** "trend" (daily crossover above), "scalp" ([Scalp]), "portfolio" ([Portfolio]) or "fast" ([Fast]). */
     val mode: String = "trend",
     val scalp: ScalpSettings = ScalpSettings(),
+    val quick: FastSettings = FastSettings(),
 ) {
     init {
         require(fast in 1 until slow) { "fast window must be shorter than slow window" }

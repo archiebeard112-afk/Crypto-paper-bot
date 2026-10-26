@@ -17,6 +17,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import bot.Action
 import bot.Decision
+import bot.Fast
 import bot.Portfolio
 import bot.Position
 import bot.ProfitLoss
@@ -55,7 +56,11 @@ object Bot {
         if (s.mode == "portfolio") return runPortfolio(context, api, equity, cash, trade)
         val now = Instant.now().epochSecond
         val scalp = s.mode == "scalp"
-        val bars = if (scalp) {
+        val fast = s.mode == "fast"
+        val bars = if (fast) {
+            api.bars(s.symbol, "1Min", Instant.ofEpochSecond(now - 4 * 3600))
+                .filter { it.time + Fast.BAR_SECONDS <= now }
+        } else if (scalp) {
             api.bars(s.symbol, "15Min", Instant.ofEpochSecond(now - 4 * DAY))
                 .filter { it.time + Scalp.BAR_SECONDS <= now } // only finished candles
         } else {
@@ -71,10 +76,12 @@ object Bot {
         val botEquity = pl?.let { minOf(it.currentValue, equity) } ?: equity
         val botCash = pl?.let { minOf(it.cash, cash).coerceAtLeast(0.0) } ?: cash
 
-        val action = if (scalp) {
-            val entryTime = if (pos == null) null else api.orders(s.symbol, "closed")
-                .firstOrNull { it.optString("side") == "buy" && !it.isNull("filled_at") }
-                ?.let { Instant.parse(it.getString("filled_at")).epochSecond }
+        val entryTime = if (pos == null || !(scalp || fast)) null else api.orders(s.symbol, "closed")
+            .firstOrNull { it.optString("side") == "buy" && !it.isNull("filled_at") }
+            ?.let { Instant.parse(it.getString("filled_at")).epochSecond }
+        val action = if (fast) {
+            Fast.decide(s, s.quick, bars, price, position, entryTime, now, botEquity, botCash)
+        } else if (scalp) {
             Scalp.decide(s, bars, price, position, entryTime, now, botEquity, botCash)
         } else {
             Decision.decide(s, bars, price, position, botEquity, botCash) { since ->
@@ -89,7 +96,7 @@ object Bot {
             is Action.Buy -> {
                 api.buyNotional(s.symbol, action.notional)
                 record(context, "BUY ${Decision.money(action.notional)} of ${s.symbol} at about ${Decision.money(price)}. ${action.reason}", notify = true)
-                if (scalp) {
+                if (scalp || fast) {
                     // Rest the take-profit as soon as the buy fills, so a quick bounce isn't missed between checks.
                     repeat(10) {
                         Thread.sleep(1_000)
@@ -106,7 +113,9 @@ object Bot {
             }
             is Action.Hold -> {
                 if (pos != null) ensureExitOrder(api, s, pos)
-                record(context, "${s.symbol} ${Decision.money(price)}: ${action.reason}", notify = false)
+                // Fast mode checks every 30 seconds; keep the log for trades only and show the status instead.
+                if (fast) BotStore.setStatus(context, "${s.symbol} ${Decision.money(price)}: ${action.reason}")
+                else record(context, "${s.symbol} ${Decision.money(price)}: ${action.reason}", notify = false)
             }
         }
         return Snapshot(equity, cash, price, position, action)
@@ -186,7 +195,7 @@ object Bot {
      * would hold the same coins.
      */
     private fun ensureExitOrder(api: AlpacaClient, s: Settings, pos: JSONObject) {
-        val scalp = s.mode == "scalp"
+        val scalp = s.mode == "scalp" || s.mode == "fast"
         val wanted = if (scalp) "limit" else "stop_limit"
         val sells = api.orders(s.symbol, "open").filter { it.optString("side") == "sell" }
         if (sells.any { it.optString("type") == wanted }) return
@@ -196,7 +205,7 @@ object Bot {
         if ((qty.toDoubleOrNull() ?: 0.0) <= 0) return
         val entry = pos.getDouble("avg_entry_price")
         if (scalp) {
-            api.limitSell(s.symbol, qty, entry * (1 + s.scalp.takeProfitPct))
+            api.limitSell(s.symbol, qty, entry * (1 + if (s.mode == "fast") s.quick.takeProfitPct else s.scalp.takeProfitPct))
         } else {
             // The limit sits 2% under the stop so the order still fills in a fast drop. The bot also
             // checks the stop itself every run, in case the price gaps past the limit.
@@ -228,6 +237,8 @@ object Bot {
     fun schedule(context: Context, on: Boolean) {
         BotStore.setEnabled(context, on)
         val wm = WorkManager.getInstance(context)
+        val fastMode = BotStore.settings(context).mode == "fast"
+        if (on && fastMode) FastService.start(context) else FastService.stop(context)
         if (!on) {
             wm.cancelUniqueWork("bot")
             return
@@ -242,6 +253,8 @@ object Bot {
 class BotWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         if (!BotStore.isEnabled(applicationContext)) return Result.success()
+        // Fast mode runs in FastService every 30 seconds instead.
+        if (BotStore.settings(applicationContext).mode == "fast") return Result.success()
         return try {
             withContext(Dispatchers.IO) { Bot.runOnce(applicationContext, trade = true) }
             Result.success()

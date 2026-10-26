@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import bot.FastSettings
 import bot.ScalpSettings
 import bot.Settings
 import org.json.JSONArray
@@ -86,6 +87,13 @@ object BotStore {
                     trendFilter = p.getBoolean("s_trend", d.scalp.trendFilter),
                     entry = p.getString("s_entry", d.scalp.entry)!!,
                 ),
+                quick = FastSettings(
+                    takeProfitPct = p.getFloat("f_tp", d.quick.takeProfitPct.toFloat()).toDouble(),
+                    stopPct = p.getFloat("f_sl", d.quick.stopPct.toFloat()).toDouble(),
+                    maxHoldMinutes = p.getInt("f_hold", d.quick.maxHoldMinutes),
+                    minHourlyMove = p.getFloat("f_vol", d.quick.minHourlyMove.toFloat()).toDouble(),
+                    entry = p.getString("f_entry", d.quick.entry)!!,
+                ),
             )
         } catch (e: IllegalArgumentException) {
             d
@@ -99,6 +107,9 @@ object BotStore {
         .putFloat("s_rsi", s.scalp.rsiBuy.toFloat()).putFloat("s_tp", s.scalp.takeProfitPct.toFloat())
         .putFloat("s_stop", s.scalp.stopPct.toFloat()).putInt("s_hold", s.scalp.maxHoldBars)
         .putBoolean("s_trend", s.scalp.trendFilter).putString("s_entry", s.scalp.entry)
+        .putFloat("f_tp", s.quick.takeProfitPct.toFloat()).putFloat("f_sl", s.quick.stopPct.toFloat())
+        .putInt("f_hold", s.quick.maxHoldMinutes).putFloat("f_vol", s.quick.minHourlyMove.toFloat())
+        .putString("f_entry", s.quick.entry)
         .apply()
 
     /** The amount the bot trades with and measures profit against; 0 means "use the whole account". */
@@ -106,6 +117,11 @@ object BotStore {
     fun startTime(c: Context) = prefs(c).getLong("start_time", 0L)
     fun setStartingAmount(c: Context, amount: Double) = prefs(c).edit()
         .putString("start_amount", amount.toString()).putLong("start_time", System.currentTimeMillis()).apply()
+
+    /** Latest status line from fast mode (it checks too often to log every check). */
+    fun status(c: Context) = prefs(c).getString("status", null)
+    fun setStatus(c: Context, text: String) = prefs(c).edit().putString("status", text).putLong("status_time", System.currentTimeMillis()).apply()
+    fun statusTime(c: Context) = prefs(c).getLong("status_time", 0L)
 
     fun isEnabled(c: Context) = prefs(c).getBoolean("enabled", false)
     fun setEnabled(c: Context, on: Boolean) = prefs(c).edit().putBoolean("enabled", on).apply()

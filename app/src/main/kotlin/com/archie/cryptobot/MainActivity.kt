@@ -62,6 +62,8 @@ import bot.Action
 import bot.Backtest
 import bot.BacktestResult
 import bot.Decision
+import bot.Fast
+import bot.FastSettings
 import bot.Metrics
 import bot.Portfolio
 import bot.ProfitLoss
@@ -129,6 +131,8 @@ fun BotScreen() {
     val hasKeys = KeyVault.load(context) != null
 
     Text(if (s.mode == "portfolio") "Trend portfolio: BTC + ETH + SOL, daily, 150-day trend, volatility-sized"
+        else if (s.mode == "fast") "${s.symbol}  ·  Fast (1-min): +${pct(s.quick.takeProfitPct, 2)} / -${pct(s.quick.stopPct, 2)}, " +
+            "max ${s.quick.maxHoldMinutes} min  ·  cap ${pct(s.maxPositionPct)}"
         else if (s.mode == "scalp") "${s.symbol}  ·  Scalp${if (s.scalp.entry == "reversal") " (dip then turn up)" else ""}: RSI<${s.scalp.rsiBuy.toInt()}, +${pct(s.scalp.takeProfitPct, 1)} / -${pct(s.scalp.stopPct, 1)}, " +
             "max ${s.scalp.maxHoldBars * 15 / 60.0}h  ·  cap ${pct(s.maxPositionPct)}"
         else "${s.symbol}  ·  Trend: SMA ${s.fast}/${s.slow} days  ·  cap ${pct(s.maxPositionPct)}  ·  stop ${pct(s.stopLossPct)}",
@@ -142,11 +146,14 @@ fun BotScreen() {
     var refresh by remember { mutableIntStateOf(0) }
     ProfitLossCard(refresh)
     Spacer(Modifier.height(16.dp))
+    VolatilityCard()
+    Spacer(Modifier.height(16.dp))
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Bot running", fontWeight = FontWeight.Bold)
-            Text("Checks every 15 minutes, even when the app is closed", style = MaterialTheme.typography.bodySmall)
+            Text(if (s.mode == "fast") "Fast mode: checks every 30 seconds and shows a notification while on (uses more battery)"
+                else "Checks every 15 minutes, even when the app is closed", style = MaterialTheme.typography.bodySmall)
         }
         Switch(checked = enabled, onCheckedChange = {
             enabled = it
@@ -178,6 +185,10 @@ fun BotScreen() {
         }
     }) { Text(if (busy) "Checking…" else "Check now (no trade)") }
     status?.let { Card(Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(it, Modifier.padding(16.dp)) } }
+    if (s.mode == "fast") BotStore.status(context)?.let {
+        val at = DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(BotStore.statusTime(context)))
+        Text("Last fast check ($at): $it", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+    }
 
     Spacer(Modifier.height(20.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -190,6 +201,48 @@ fun BotScreen() {
         Column(Modifier.padding(vertical = 6.dp)) {
             Text(fmt.format(Date(it.time)), style = MaterialTheme.typography.labelSmall)
             Text(it.text, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+fun VolatilityCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var rows by remember { mutableStateOf<List<Pair<String, Fast.Volatility>>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Market volatility", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                OutlinedButton(enabled = !busy, onClick = {
+                    busy = true
+                    scope.launch {
+                        try {
+                            rows = withContext(Dispatchers.IO) {
+                                val api = AlpacaClient(KeyVault.load(context))
+                                val since = Instant.now().minusSeconds(7L * 86_400)
+                                BotStore.symbols.map { sym -> sym to Fast.volatility(api.bars(sym, "1Min", since).map { it.close }.toDoubleArray()) }
+                            }
+                            error = null
+                        } catch (e: Exception) {
+                            error = e.message
+                        }
+                        busy = false
+                    }
+                }) { Text(if (busy) "Loading…" else if (rows == null) "Check" else "Refresh") }
+            }
+            Text("Typical price move in an hour right now, versus a normal hour over the past week.", style = MaterialTheme.typography.bodySmall)
+            error?.let { Text("Couldn't load: $it", color = MaterialTheme.colorScheme.error) }
+            rows?.let { list ->
+                Spacer(Modifier.height(8.dp))
+                TableRow(listOf("", "Last hour", "Normal", "Last 24h", "Now"), header = true)
+                list.forEach { (sym, v) ->
+                    TableRow(listOf(sym, pct(v.lastHour, 2), pct(v.normalHour, 2), pct(v.lastDay, 1), v.label),
+                        color = when (v.label) { "Busy" -> Color(0xFFEF6C00); "Calm" -> Color(0xFF90A4AE); else -> Color(0xFF66BB6A) })
+                }
+            }
         }
     }
 }
@@ -282,7 +335,9 @@ fun BacktestScreen() {
     val s = BotStore.settings(context)
 
     val scalp = s.mode == "scalp"
-    Text(if (s.mode == "portfolio") "Replays the trend portfolio on daily BTC, ETH and SOL history from Alpaca and compares " +
+    Text(if (s.mode == "fast") "Replays fast mode on the last 7 days of 1-minute ${s.symbol} candles from Alpaca. If the stop and " +
+            "take-profit are both touched in the same minute, it assumes the stop hit first. Every fill pays a ${pct(s.feePct, 2)} fee."
+        else if (s.mode == "portfolio") "Replays the trend portfolio on daily BTC, ETH and SOL history from Alpaca and compares " +
             "it with buying and holding. Each trade pays a ${pct(s.feePct, 2)} fee."
         else if (scalp) "Replays scalp mode on the last 90 days of 15-minute ${s.symbol} candles from Alpaca and compares it with " +
             "buying and holding. Take-profits fill inside a candle; stops and time limits fill at the candle's close, " +
@@ -298,6 +353,16 @@ fun BacktestScreen() {
             try {
                 rows = withContext(Dispatchers.IO) {
                     val api = AlpacaClient(KeyVault.load(context))
+                    if (s.mode == "fast") {
+                        val bars = api.bars(s.symbol, "1Min", Instant.now().minusSeconds(7L * 86_400))
+                        return@withContext listOf(
+                            "Buy and hold" to Fast.buyAndHold(bars, s),
+                            "Your settings, if trading were free" to Fast.backtest(bars, s.copy(feePct = 0.0), s.quick),
+                            (if (s.quick.minHourlyMove > 0) "Same, without the volatility filter" else "Same, only when 1-hour move > 1%") to
+                                Fast.backtest(bars, s, s.quick.copy(minHourlyMove = if (s.quick.minHourlyMove > 0) 0.0 else 0.01)),
+                            "Your settings" to Fast.backtest(bars, s, s.quick),
+                        ).map { (n, r) -> BacktestRow(n, r, Backtest.metrics(r, 365.0 * 1440)) }
+                    }
                     if (s.mode == "portfolio") {
                         val data = Portfolio.COINS.associateWith { api.dailyBars(it, Instant.parse("2015-01-01T00:00:00Z")) }
                         return@withContext listOf(
@@ -420,6 +485,11 @@ fun SettingsScreen() {
     var hold by remember { mutableStateOf(trim(current.scalp.maxHoldBars / 4.0)) }
     var trendFilter by remember { mutableStateOf(current.scalp.trendFilter) }
     var entry by remember { mutableStateOf(current.scalp.entry) }
+    var fTp by remember { mutableStateOf(trim(current.quick.takeProfitPct * 100)) }
+    var fSl by remember { mutableStateOf(trim(current.quick.stopPct * 100)) }
+    var fHold by remember { mutableStateOf(current.quick.maxHoldMinutes.toString()) }
+    var fVol by remember { mutableStateOf(trim(current.quick.minHourlyMove * 100)) }
+    var fEntry by remember { mutableStateOf(current.quick.entry) }
     var message by remember { mutableStateOf<String?>(null) }
     var amountMessage by remember { mutableStateOf<String?>(null) }
     var amount by remember { mutableStateOf(BotStore.startingAmount(context).takeIf { it > 0 }?.toInt()?.toString() ?: "") }
@@ -468,10 +538,14 @@ fun SettingsScreen() {
         FilterChip(selected = mode == "portfolio", onClick = { mode = "portfolio" }, label = { Text("Trend portfolio") })
         FilterChip(selected = mode == "trend", onClick = { mode = "trend" }, label = { Text("Trend (one coin)") })
         FilterChip(selected = mode == "scalp", onClick = { mode = "scalp" }, label = { Text("Scalp (15-min)") })
+        FilterChip(selected = mode == "fast", onClick = { mode = "fast" }, label = { Text("Fast (1-min)") })
     }
     if (mode == "portfolio") Text("Best model from testing. Splits the bot's money into thirds for BTC, ETH and SOL. Holds a coin " +
         "only while its price is above its 150-day average, and holds less of it when it's swinging wildly. Rebalances when a " +
         "holding drifts more than 10% from target. Settings are fixed to what was tested.", style = MaterialTheme.typography.bodySmall)
+    else if (mode == "fast") Text("Many quick trades on 1-minute candles. Sells at your take-profit, your stop-loss, or a time " +
+        "limit, whichever comes first. Each round trip costs about 0.5% in Alpaca fees, so the take-profit must be well above " +
+        "that to come out ahead. In testing on real data, no fast setting made money after fees.", style = MaterialTheme.typography.bodySmall)
     else Text(if (mode == "scalp") "Buys sharp dips on 15-minute candles (RSI below your level) and sells quickly at a small " +
             "gain, a small loss, or a time limit. Trades often, so fees matter a lot."
         else "Buys when the fast moving average of daily closes rises above the slow one, sells when it drops below. Trades a few times a year.",
@@ -501,6 +575,35 @@ fun SettingsScreen() {
             Switch(checked = trendFilter, onCheckedChange = { trendFilter = it })
         }
         NumberField("Max position %", cap, Modifier.fillMaxWidth()) { cap = it }
+    } else if (mode == "fast") {
+        Text("When to buy", style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = fEntry == "breakout", onClick = { fEntry = "breakout" }, label = { Text("Breakout") })
+            FilterChip(selected = fEntry == "dip_turn_up", onClick = { fEntry = "dip_turn_up" }, label = { Text("Dip then turn up") })
+        }
+        Text(if (fEntry == "breakout") "Buys when the price makes a new 20-minute high while the short-term trend is up."
+            else "Buys when, within 10 minutes of a sharp dip, the 9-minute average crosses above the 21-minute one.",
+            style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Take profit %", fTp, Modifier.weight(1f), decimal = true) { fTp = it }
+            NumberField("Stop loss %", fSl, Modifier.weight(1f), decimal = true) { fSl = it }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Max hold (minutes)", fHold, Modifier.weight(1f)) { fHold = it }
+            NumberField("Min 1-hour move %", fVol, Modifier.weight(1f), decimal = true) { fVol = it }
+        }
+        NumberField("Max position %", cap, Modifier.fillMaxWidth()) { cap = it }
+        val size = (BotStore.startingAmount(context).takeIf { it > 0 } ?: 1000.0) * ((cap.toDoubleOrNull() ?: 0.0) / 100)
+        val tpV = (fTp.toDoubleOrNull() ?: 0.0) / 100
+        val slV = (fSl.toDoubleOrNull() ?: 0.0) / 100
+        val fee = 0.0025
+        Text("On a ${Decision.money(size)} trade: a win makes about ${Decision.money(size * (tpV - 2 * fee))} after fees, " +
+            "a loss costs about ${Decision.money(size * (slV + 2 * fee))}.",
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+        if (tpV <= 2 * fee) Text("This take-profit is smaller than the fees, so even winning trades lose money.",
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        Text("\"Min 1-hour move\" skips calm markets: set 0 to trade all the time, 1 to wait until a coin typically moves 1% an hour.",
+            style = MaterialTheme.typography.bodySmall)
     } else if (mode == "trend") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NumberField("Fast (days)", fast, Modifier.weight(1f)) { fast = it }
@@ -516,8 +619,11 @@ fun SettingsScreen() {
             val s = Settings(symbol = symbol, fast = fast.toInt(), slow = slow.toInt(),
                 maxPositionPct = cap.toDouble() / 100, stopLossPct = stop.toDouble() / 100, mode = mode,
                 scalp = ScalpSettings(rsiBuy = rsi.toDouble(), takeProfitPct = tp.toDouble() / 100, stopPct = sStop.toDouble() / 100,
-                    maxHoldBars = maxOf(1, Math.round(hold.toDouble() * 4).toInt()), trendFilter = trendFilter, entry = entry))
+                    maxHoldBars = maxOf(1, Math.round(hold.toDouble() * 4).toInt()), trendFilter = trendFilter, entry = entry),
+                quick = FastSettings(takeProfitPct = fTp.toDouble() / 100, stopPct = fSl.toDouble() / 100,
+                    maxHoldMinutes = fHold.toInt(), minHourlyMove = (fVol.toDoubleOrNull() ?: 0.0) / 100, entry = fEntry))
             BotStore.saveSettings(context, s)
+            if (BotStore.isEnabled(context)) Bot.schedule(context, true) // start or stop the fast loop to match the mode
             "Saved. The bot uses these from its next check."
         } catch (e: Exception) {
             "Not saved: ${e.message ?: "check the numbers"}"
