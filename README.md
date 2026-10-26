@@ -12,6 +12,8 @@ An Android app that runs a simple crypto trading strategy on an **Alpaca paper a
   - Stop loss: sell if the price falls 15% below the entry price (adjustable). A stop-limit order rests at Alpaca, and the bot also checks the stop itself every 15 minutes.
   - After an exit, no re-entry until the next fresh cross up.
 - **Scalp mode (optional):** on 15-minute candles, buys sharp dips (RSI below 30, only while the ~2-day trend is up), then sells at +1.5% (a resting limit order), -1.5%, or after 6 hours. Optional "dip then turn up" entry waits for the price to start rising first. All adjustable.
+- **Fast mode (optional):** 1-minute candles, buys a 20-minute breakout (or a dip that turns up), sells at your take-profit, your stop-loss or a time limit. Can skip calm markets with a minimum 1-hour move. Runs every 30 seconds in a foreground service with an ongoing notification while switched on.
+- **Market volatility panel:** typical 1-hour move per coin now vs a normal hour over the past week (Calm / Normal / Busy).
 - **Runs in the background** every 15 minutes (Android's minimum) and sends a notification for every trade.
 - **Starting amount and profit/loss:** set how much paper money the bot trades with; the Bot tab shows profit or loss since then (closed trades and open position), plus the whole account's value over the last month.
 - **Backtest tab:** replays the strategy on daily history from Alpaca and compares it with buy-and-hold, including fees.
@@ -74,6 +76,10 @@ Waiting for the turn up avoids most falling knives, but it did not reliably beat
 \*+10% if bought once and left alone, +54% if rebalanced to equal thirds daily.
 
 It is a "lose less in crashes" model: in 2021 it made +129% while holding made +1,150%, and in 2022 it lost 11% while holding lost 80%. Holding only Bitcoin made more since 2024, with twice the worst drop. Under three years of out-of-sample data is not proof it will keep working.
+
+### Fast mode, 1-minute candles (Jul to Sep 2026)
+
+`research/fast_search.py` tried breakout, dip-then-turn-up, average-cross and random entries with take-profit/stop-loss pairs from 0.2% to 2% and volatility filters, across BTC, ETH and SOL (over 1,000 combinations). At Alpaca's 0.25% fee, **none** made money, in the tuning months or the test month; at 0.10% about 1% did; with zero fees about half did, which is what chance looks like. The many-trades setting (+0.3% / -0.3%, ~25 trades a day) lost essentially everything in two months, because each round trip costs ~0.5%, more than the take-profit. Meanwhile buying and holding gained 42% to 71%.
 
 ## Project layout
 
