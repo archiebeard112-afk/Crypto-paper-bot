@@ -47,14 +47,15 @@ object Bot {
      */
     fun runOnce(context: Context, trade: Boolean): Snapshot {
         val keys = KeyVault.load(context) ?: error("Add your Alpaca paper API keys in Settings first")
-        val s = BotStore.settings(context)
+        val saved = BotStore.settings(context)
         val api = AlpacaClient(keys)
 
         val account = api.account() // throws unless this is a paper account
         val equity = account.getDouble("equity")
         val cash = account.optDouble("non_marginable_buying_power", account.getDouble("cash"))
-        if (s.mode == "portfolio") return runPortfolio(context, api, equity, cash, trade)
+        if (saved.mode == "portfolio") return runPortfolio(context, api, equity, cash, trade)
         val now = Instant.now().epochSecond
+        val s = if (saved.mode == "fast" && saved.autoCoin) saved.copy(symbol = autoCoin(context, api, saved, now, trade)) else saved
         val scalp = s.mode == "scalp"
         val fast = s.mode == "fast"
         val bars = if (fast) {
@@ -119,6 +120,26 @@ object Bot {
             }
         }
         return Snapshot(equity, cash, price, position, action)
+    }
+
+    /**
+     * Fast mode's auto coin: stays on the current coin while it is held or has open orders, otherwise moves
+     * to whichever coin has the biggest typical 1-hour move ([Fast.pickCoin]).
+     */
+    private fun autoCoin(context: Context, api: AlpacaClient, s: Settings, now: Long, trade: Boolean): String {
+        val current = BotStore.activeSymbol(context) ?: s.symbol
+        if (api.position(current) != null || api.orders(current, "open").isNotEmpty()) return current
+        val since = Instant.ofEpochSecond(now - 2 * 3600)
+        val moves = BotStore.symbols.associateWith { sym ->
+            Fast.typicalMove(api.bars(sym, "1Min", since).filter { it.time + Fast.BAR_SECONDS <= now }.map { it.close }.toDoubleArray(), 60)
+        }
+        val pick = Fast.pickCoin(moves, current)
+        if (trade && pick != BotStore.activeSymbol(context)) {
+            BotStore.setActiveSymbol(context, pick)
+            if (pick != current) record(context, "Switched to $pick: it's moving most right now " +
+                "(typical 1-hour move ${"%.2f%%".format(moves[pick]!! * 100)} vs ${"%.2f%%".format((moves[current] ?: Double.NaN) * 100)} for $current)", notify = false)
+        }
+        return pick
     }
 
     /**

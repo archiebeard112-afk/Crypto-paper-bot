@@ -9,6 +9,7 @@ buildscript {
     }
     dependencies {
         if (hasAndroidSdk) classpath("com.android.tools.build:gradle:8.7.3")
+        if (hasAndroidSdk) classpath("app.cash.paparazzi:paparazzi-gradle-plugin:1.3.5")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21")
         classpath("org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.0.21")
     }

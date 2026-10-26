@@ -34,4 +34,13 @@ class ProfitLossTest {
         close(100.0, pl.realized)
         close(1_100.0, pl.cash)
     }
+
+    @Test fun taxEstimate() {
+        val pl = ProfitLoss(1000.0, realized = 300.0, holdings = listOf(Holding("BTC/USD", 1.0, 100.0, 60.0)))
+        val tax = Tax(rate = 0.2, allowance = 100.0)
+        assertEquals(40.0, pl.taxSoFar(tax), 1e-9)
+        assertEquals(32.0, pl.taxIfSoldNow(tax), 1e-9) // 300 - 40 unrealized loss = 260 gain, minus 100 allowance
+        assertEquals(228.0, pl.afterTax(tax), 1e-9)
+        assertEquals(0.0, ProfitLoss(1000.0, -50.0, emptyList()).taxIfSoldNow(tax), 1e-9)
+    }
 }

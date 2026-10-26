@@ -7,6 +7,7 @@ import android.util.Base64
 import bot.FastSettings
 import bot.ScalpSettings
 import bot.Settings
+import bot.Tax
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
@@ -94,6 +95,7 @@ object BotStore {
                     minHourlyMove = p.getFloat("f_vol", d.quick.minHourlyMove.toFloat()).toDouble(),
                     entry = p.getString("f_entry", d.quick.entry)!!,
                 ),
+                autoCoin = p.getBoolean("auto_coin", d.autoCoin),
             )
         } catch (e: IllegalArgumentException) {
             d
@@ -109,8 +111,20 @@ object BotStore {
         .putBoolean("s_trend", s.scalp.trendFilter).putString("s_entry", s.scalp.entry)
         .putFloat("f_tp", s.quick.takeProfitPct.toFloat()).putFloat("f_sl", s.quick.stopPct.toFloat())
         .putInt("f_hold", s.quick.maxHoldMinutes).putFloat("f_vol", s.quick.minHourlyMove.toFloat())
-        .putString("f_entry", s.quick.entry)
+        .putString("f_entry", s.quick.entry).putBoolean("auto_coin", s.autoCoin)
         .apply()
+
+    /** The coin fast mode's auto coin is on now; null until it first picks one. */
+    fun activeSymbol(c: Context) = prefs(c).getString("active_symbol", null)
+    fun setActiveSymbol(c: Context, symbol: String) = prefs(c).edit().putString("active_symbol", symbol).apply()
+
+    /** Estimated tax on gains, for the after-tax profit. Rate 0 means "don't show tax". Default: 22%, a common US federal bracket. */
+    fun tax(c: Context) = try {
+        Tax(prefs(c).getFloat("tax_rate", 0.22f).toDouble(), prefs(c).getFloat("tax_allowance", 0f).toDouble())
+    } catch (e: IllegalArgumentException) {
+        Tax()
+    }
+    fun setTax(c: Context, t: Tax) = prefs(c).edit().putFloat("tax_rate", t.rate.toFloat()).putFloat("tax_allowance", t.allowance.toFloat()).apply()
 
     /** The amount the bot trades with and measures profit against; 0 means "use the whole account". */
     fun startingAmount(c: Context) = prefs(c).getString("start_amount", "0")!!.toDouble()

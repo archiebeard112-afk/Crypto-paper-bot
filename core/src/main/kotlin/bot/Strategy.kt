@@ -19,6 +19,8 @@ data class Settings(
     val mode: String = "trend",
     val scalp: ScalpSettings = ScalpSettings(),
     val quick: FastSettings = FastSettings(),
+    /** Fast mode only: trade whichever coin is moving most, switching only while nothing is held ([Fast.pickCoin]). */
+    val autoCoin: Boolean = false,
 ) {
     init {
         require(fast in 1 until slow) { "fast window must be shorter than slow window" }

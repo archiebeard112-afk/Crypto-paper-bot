@@ -16,6 +16,29 @@ data class ProfitLoss(val startingAmount: Double, val realized: Double, val hold
     val currentValue get() = startingAmount + total
     val totalPct get() = if (startingAmount > 0) total / startingAmount else 0.0
     val cash get() = currentValue - holdings.sumOf { it.value }
+
+    /** Estimated tax owed on closed trades so far: [Tax.rate] on gains above the allowance. Losses offset gains. */
+    fun taxSoFar(tax: Tax) = tax.on(realized)
+
+    /** Estimated tax if every holding were sold at today's prices. */
+    fun taxIfSoldNow(tax: Tax) = tax.on(total)
+
+    /** Profit after the tax that selling everything now would cost. */
+    fun afterTax(tax: Tax) = total - taxIfSoldNow(tax)
+}
+
+/**
+ * A simple flat-rate estimate of tax on crypto gains: every sale is a taxable event, gains and losses
+ * in the period net off, and [allowance] of net gain is tax-free. Real rules (holding periods,
+ * matching rules, income bands) vary by country, so this is a rough guide, not tax advice.
+ */
+data class Tax(val rate: Double = 0.0, val allowance: Double = 0.0) {
+    init {
+        require(rate in 0.0..1.0) { "tax rate must be between 0 and 100%" }
+        require(allowance >= 0) { "tax-free allowance can't be negative" }
+    }
+
+    fun on(gain: Double) = rate * (gain - allowance).coerceAtLeast(0.0)
 }
 
 object ProfitLossCalc {

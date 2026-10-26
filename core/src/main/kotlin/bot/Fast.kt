@@ -108,6 +108,77 @@ object Fast {
         return BacktestResult(LongArray(equity.size) { bars[WARMUP + it].time }, equity, emptyList(), 1.0)
     }
 
+    /**
+     * Auto coin: the coin with the biggest typical 1-hour move right now. Only called while nothing is held,
+     * so the bot never switches out of an open trade. A challenger must move [margin] times more than the
+     * current coin, so the bot doesn't flip between coins that are about equally busy.
+     */
+    fun pickCoin(moves: Map<String, Double>, current: String, margin: Double = 1.2): String {
+        val best = moves.filterValues { !it.isNaN() }.maxByOrNull { it.value } ?: return current
+        val now = moves[current]
+        return if (now == null || now.isNaN() || best.value > now * margin) best.key else current
+    }
+
+    /**
+     * [backtest] with auto coin: while flat, follow [pickCoin] each minute and enter on that coin's setup.
+     * Candles are matched by time; minutes missing from any coin are skipped.
+     */
+    fun backtestAuto(barsByCoin: Map<String, List<Bar>>, s: Settings, p: FastSettings, initialCash: Double = 100_000.0): BacktestResult {
+        val times = barsByCoin.values.map { bars -> bars.map { it.time }.toSet() }.reduce { a, b -> a intersect b }.sorted()
+        val coins = barsByCoin.keys.toList()
+        val aligned = coins.associateWith { c -> val byTime = barsByCoin[c]!!.associateBy { it.time }; times.map { byTime[it]!! } }
+        require(times.size > WARMUP + 2) { "need more than $WARMUP one-minute candles" }
+        val sig = coins.associateWith { signal(aligned[it]!!, p) }
+        val closes = coins.associateWith { c -> aligned[c]!!.map { it.close }.toDoubleArray() }
+        var coin = s.symbol.takeIf { it in coins } ?: coins.first()
+        var cash = initialCash
+        var qty = 0.0
+        var entryPx = 0.0
+        var entryPaid = 0.0
+        var entryIdx = 0
+        var pending: String? = null
+        var held = 0
+        val trades = mutableListOf<Trade>()
+        val equity = DoubleArray(times.size - WARMUP)
+        for (i in WARMUP until times.size) {
+            if (pending != null && qty == 0.0) {
+                coin = pending
+                val b = aligned[coin]!![i]
+                entryPx = b.open
+                entryPaid = b.open * (1 + s.feePct)
+                qty = cash * s.maxPositionPct / entryPaid
+                cash -= qty * entryPaid
+                entryIdx = i
+            }
+            pending = null
+            val b = aligned[coin]!![i]
+            if (qty > 0) {
+                held++
+                val stop = entryPx * (1 - p.stopPct)
+                val take = entryPx * (1 + p.takeProfitPct)
+                val exit = when {
+                    b.low <= stop -> min(stop, b.open) to "stop"
+                    b.high >= take -> maxOf(take, b.open) to "take profit"
+                    i - entryIdx + 1 >= p.maxHoldMinutes -> b.close to "time"
+                    else -> null
+                }
+                if (exit != null) {
+                    val fill = exit.first * (1 - s.feePct)
+                    cash += qty * fill
+                    trades += Trade(aligned[coin]!![entryIdx].time, b.time, entryPaid, fill, exit.second)
+                    qty = 0.0
+                }
+            }
+            equity[i - WARMUP] = cash + qty * b.close
+            if (qty == 0.0) {
+                val pick = pickCoin(coins.associateWith { typicalMove(closes[it]!!, 60, i + 1) }, coin)
+                coin = pick
+                if (sig[coin]!![i]) pending = coin
+            }
+        }
+        return BacktestResult(LongArray(equity.size) { times[WARMUP + it] }, equity, trades, held.toDouble() / equity.size)
+    }
+
     /** How busy a coin is: typical 1-hour move now, over the last 24 hours, and the 7-day normal (median hour). */
     data class Volatility(val lastHour: Double, val lastDay: Double, val normalHour: Double) {
         val ratio get() = lastHour / normalHour
