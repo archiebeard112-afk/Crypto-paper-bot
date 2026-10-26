@@ -26,6 +26,14 @@ jobs:
               done
             done
           done
+          for sym in BTCUSDT ETHUSDT SOLUSDT; do
+            mkdir -p data/$sym/1m
+            for i in 1 2 3; do
+              m=$(date -u -d "$(date -u +%Y-%m-01) -$i month" +%Y-%m)
+              curl -fsSL -o /tmp/k.zip "https://data.binance.vision/data/spot/monthly/klines/$sym/1m/$sym-1m-$m.zip" \
+                && unzip -o -q /tmp/k.zip -d data/$sym/1m || echo "missing $sym 1m $m"
+            done
+          done
           (cd data && zip -q -r ../research-data.zip .)
           ls -l research-data.zip
       - name: Publish
